@@ -1,6 +1,7 @@
 """SQLite persistence and all-or-nothing catalogue replacement."""
 import json
 import sqlite3
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from statistics import median
@@ -10,6 +11,7 @@ from pathlib import Path
 
 def purchase_matches_source(purchase, kind):
     expected = {'simulated':'fixture', 'culture-public':'culture-public',
+                'culture-public-prepared':'culture-public',
                 'pro-culture':'pro-culture', 'pro-culture-prepared':'pro-culture'}.get(kind)
     if not expected:
         return False
@@ -33,6 +35,7 @@ class Store:
                 CREATE TABLE IF NOT EXISTS venues (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, event_id TEXT NOT NULL REFERENCES events(id), venue_id TEXT NOT NULL REFERENCES venues(id), payload TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, profile TEXT, stage TEXT, draft TEXT, reminders INTEGER NOT NULL DEFAULT 0, selected_plan TEXT);
                 CREATE TABLE IF NOT EXISTS purchases (user_id TEXT NOT NULL, session_id TEXT NOT NULL, actual_price INTEGER NOT NULL, item TEXT NOT NULL, PRIMARY KEY(user_id, session_id));
                 CREATE TABLE IF NOT EXISTS deliveries (id TEXT PRIMARY KEY, delivered_at TEXT NOT NULL);
@@ -77,6 +80,12 @@ class Store:
             raise
         finally:
             db.close()
+
+    def demo_cookie_key(self):
+        """Stable per-install secret, separate from distributable catalogue metadata."""
+        with self.db() as db:
+            db.execute('INSERT OR IGNORE INTO app_config VALUES (?,?)', ('demo_cookie_key', secrets.token_hex(32)))
+            return db.execute('SELECT value FROM app_config WHERE key=?', ('demo_cookie_key',)).fetchone()[0]
 
     def meta(self):
         with self.db() as db:

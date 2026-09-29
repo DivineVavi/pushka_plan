@@ -1,0 +1,19 @@
+# Allow only build inputs. In particular: no .env, .git, .pi/keys,
+# working SQLite databases, cloud artifacts, logs or unrelated documents.
+**
+!Dockerfile
+!requirements.txt
+!pushka/
+!pushka/**
+!static/
+!static/**
+!certs/
+!certs/russian_trusted_root_ca.pem
+!data/
+!data/demo-v1.json
+!data/catalog-snapshot.sqlite3
+!tests/
+!tests/**
+**/__pycache__
+**/*.pyc
+**/*.pyo

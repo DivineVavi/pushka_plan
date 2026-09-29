@@ -1,6 +1,7 @@
 __pycache__/
 *.py[cod]
 *.sqlite3
+!data/catalog-snapshot.sqlite3
 *.sqlite3-*
 .env
 .pi/

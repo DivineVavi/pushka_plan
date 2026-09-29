@@ -1,10 +1,12 @@
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PUSHKA_DB=/var/lib/pushka/pushka.sqlite3 PORT=8000
 WORKDIR /app
 COPY pushka/ /app/pushka/
 COPY certs/ /app/certs/
 COPY static/ /app/static/
-COPY data/ /app/data/
+COPY data/demo-v1.json data/catalog-snapshot.sqlite3 /app/data/
+COPY requirements.txt /app/requirements.txt
+COPY tests/ /app/tests/
 RUN useradd -r -u 10001 pushka && mkdir -p /var/lib/pushka && chown pushka:pushka /var/lib/pushka
 USER pushka
 EXPOSE 8000

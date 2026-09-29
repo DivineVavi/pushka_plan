@@ -1,0 +1,5 @@
+# No third-party Python packages: all imports use Python 3.12's standard library.
+# Runtime: Python 3.12, bundled sqlite3, system tzdata and CA certificates.
+# Dockerfile pins the Python/base OS image by sha256 digest for reproducible builds.
+# Frontend: vanilla JavaScript; MAX Bridge is loaded from https://st.max.ru.
+# Therefore no pip install / package registry access is required during build.

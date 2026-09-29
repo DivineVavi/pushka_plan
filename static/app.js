@@ -510,6 +510,7 @@
 
   /* ---- plans ---- */
 
+  const isPublicSource = (d) => d.source && ['culture-public', 'culture-public-prepared'].includes(d.source.kind);
   const MODE_NAMES = { interest: 'По интересам', more: 'Больше впечатлений', spend: 'Почти без остатка' };
   const MODE_DESC = {
     interest: 'Максимум релевантных событий по вашим интересам.',
@@ -562,8 +563,8 @@
       '</div>' +
       '<div class="plan-stats">' +
       stat('события', String(plan.items ? plan.items.length : 0)) +
-      stat(d.source && d.source.kind === 'culture-public' ? 'плановая сумма от' : (Array.isArray(d.purchased) && d.purchased.length ? 'новые билеты' : 'итого'), fmtPrice(plan.total)) +
-      stat(d.source && d.source.kind === 'culture-public' ? 'расчётный остаток до' : 'остаток', fmtPrice(plan.leftover), 'stat--green') +
+      stat(isPublicSource(d) ? 'плановая сумма от' : (Array.isArray(d.purchased) && d.purchased.length ? 'новые билеты' : 'итого'), fmtPrice(plan.total)) +
+      stat(isPublicSource(d) ? 'расчётный остаток до' : 'остаток', fmtPrice(plan.leftover), 'stat--green') +
       stat('релевантность', typeof plan.score === 'number' ? String(Math.round(plan.score)) : '—', 'stat--accent') +
       '</div>';
 
@@ -698,7 +699,7 @@
     const src = d.source;
     if (src) {
       sourceLine.hidden = false;
-      const label = [src.kind, src.label].filter(Boolean).join(' · ');
+      const label = src.label || 'Источник не указан';
       const parts = [];
       if (label) parts.push('Данные: ' + esc(label));
       if (src.fetchedAt) parts.push('обновлено ' + esc(fmtDT(src.fetchedAt)));
@@ -819,8 +820,8 @@
     return [
       'План «' + MODE_NAMES[key] + '» · Пушка-план' + (d.demo ? ' · ДЕМО: вымышленные события, билеты недоступны' : ''),
       lines.join('\n'),
-      (d.source && d.source.kind === 'culture-public' ? 'Плановая сумма от: ' : (d.purchased && d.purchased.length ? 'Новые билеты: ' : 'Итого: ')) + fmtPrice(plan.total) + ' · ' + (d.source && d.source.kind === 'culture-public' ? 'Расчётный остаток до: ' : 'Остаток: ') + fmtPrice(plan.leftover),
-      ...(d.source && d.source.kind === 'culture-public' ? ['Проверьте сеанс, итоговую цену и наличие билетов на странице события.'] : []),
+      (isPublicSource(d) ? 'Плановая сумма от: ' : (d.purchased && d.purchased.length ? 'Новые билеты: ' : 'Итого: ')) + fmtPrice(plan.total) + ' · ' + (isPublicSource(d) ? 'Расчётный остаток до: ' : 'Остаток: ') + fmtPrice(plan.leftover),
+      ...(isPublicSource(d) ? ['Проверьте сеанс, итоговую цену и наличие билетов на странице события.'] : []),
     ].join('\n');
   }
 

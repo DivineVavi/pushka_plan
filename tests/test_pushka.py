@@ -366,7 +366,9 @@ class AuthAndBotTests(unittest.TestCase):
 class ProductionAuthTests(unittest.TestCase):
     def test_http_max_signature_and_webhook_secret(self):
         with tempfile.TemporaryDirectory() as path:
-            app = App(Path(path)/'prod.db','max-token','secret-webhook')
+            # Authentication does not depend on the bundled snapshot's calendar dates.
+            with patch.dict(os.environ, {'CULTURE_SOURCE_MODE':'demo'}):
+                app = App(Path(path)/'prod.db','max-token','secret-webhook')
             received = []
             app.bot.handle = received.append
             server = ThreadingHTTPServer(('127.0.0.1',0), handler(app))
@@ -425,7 +427,8 @@ class SetupMaxTests(unittest.TestCase):
 class HTTPTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.app = App(Path(self.tmp.name)/'http.db')
+        with patch.dict(os.environ, {'CULTURE_SOURCE_MODE':'demo'}):
+            self.app = App(Path(self.tmp.name)/'http.db')
         self.server = ThreadingHTTPServer(('127.0.0.1',0), handler(self.app))
         self.thread = threading.Thread(target=self.server.serve_forever,daemon=True)
         self.thread.start()

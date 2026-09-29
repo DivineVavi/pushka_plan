@@ -105,13 +105,13 @@ def show_mode(state, mode):
             lines.append('Подходящих событий нет. ' + state['diagnostics'].get('message', ''))
     if state.get('selectedPlan') and state['selectedPlan']['needsConfirmation']:
         lines.append('Ранее выбранный план изменился. Подтвердите новый состав для напоминаний о покупке.')
-    if state['source']['kind'] == 'culture-public':
+    if state['source']['kind'] in ('culture-public', 'culture-public-prepared'):
         lines.append(f"Плановая сумма от: {p['total']} ₽ · расчётный остаток до: {p['leftover']} ₽ (если билеты доступны по минимальной цене)")
     else:
         lines.append(f"Новые билеты: {p['total']} ₽ · после плана останется: {p['leftover']} ₽")
     if state['demo']:
         lines.append('ДЕМО: вымышленные события; нет переходов на покупку.')
-    elif state['source']['kind'] == 'culture-public':
+    elif state['source']['kind'] in ('culture-public', 'culture-public-prepared'):
         lines.append('Предварительный план: на странице Культура.РФ проверьте сеанс, итоговую цену, возможность оплаты картой и наличие билетов.' + (' Данные устарели.' if state['source']['stale'] else ''))
     elif state['source']['stale']:
         lines.append('Данные устарели: проверьте цену и время у продавца.')
