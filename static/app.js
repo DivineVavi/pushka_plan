@@ -566,7 +566,7 @@
   }
 
   function collectProfile() {
-    const balance = readNumber(fBalance, 'остаток на карте', 0, 100000);
+    const balance = readNumber(fBalance, 'остаток на карте', 0, 5000);
     syncDateBounds();
     const deadline = fDeadline.value;
     if (!deadline || deadline < fDeadline.min || deadline > fDeadline.max) {
@@ -606,7 +606,7 @@
       excludedCategories: excluded,
       maxEvents: readNumber(fMaxEvents, 'количество событий', 1, 4),
       travelBufferMinutes: readNumber(fBuffer, 'запас на дорогу в минутах', 0, 240),
-      age: readNumber(fAge, 'возраст', 0, 120),
+      age: readNumber(fAge, 'возраст', 14, 22),
     };
 
     const dist = readNumber(fDistance, 'радиус в километрах', 0, 500, false, true);

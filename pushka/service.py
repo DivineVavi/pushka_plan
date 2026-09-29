@@ -23,7 +23,7 @@ def validate_profile(data, now=None):
     now = now or datetime.now(timezone.utc)
     if not isinstance(data, dict):
         raise Invalid('Нужен объект профиля')
-    balance = integer(data.get('maxBalance'), 0, 100000, 'Остаток')
+    balance = integer(data.get('maxBalance'), 0, 5000, 'Остаток')
     locale = data.get('localeId')
     if not isinstance(locale, str) or not 1 <= len(locale.strip()) <= 100:
         raise Invalid('Укажите город или ID локали')
@@ -66,7 +66,7 @@ def validate_profile(data, now=None):
     if not isinstance(excluded, list) or len(excluded) > 30 or not all(isinstance(x, str) and len(x) <= 100 for x in excluded):
         raise Invalid('Неверные исключённые категории')
     clean = {'maxBalance': balance, 'localeId': locale.strip(), 'planningDeadline': deadline.isoformat(), 'availability': available,
-             'categoryWeights': weights, 'excludedCategories': list(dict.fromkeys(excluded)), 'age': integer(data.get('age'), 0, 120, 'Возраст'),
+             'categoryWeights': weights, 'excludedCategories': list(dict.fromkeys(excluded)), 'age': integer(data.get('age'), 14, 22, 'Возраст'),
              'maxEvents': integer(data.get('maxEvents'), 1, 4, 'Количество событий'), 'travelBufferMinutes': integer(data.get('travelBufferMinutes', 30), 0, 240, 'Буфер')}
     if data.get('maxDistanceKm') not in (None, ''):
         try:

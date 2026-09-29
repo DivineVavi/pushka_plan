@@ -7,16 +7,16 @@ from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
-from .service import Invalid
+from .service import Invalid, integer
 
 API = 'https://platform-api2.max.ru'
 STEPS = ('balance','locale','deadline','availability','age','weights','excluded','maxEvents','distance')
 QUESTIONS = {
-    'balance': 'Введите остаток Пушкинской карты вручную в рублях (например, 3200). Это не банковский баланс.',
+    'balance': 'Введите остаток Пушкинской карты вручную: от 0 до 5000 рублей (например, 3200). Это не банковский баланс.',
     'locale': 'Город: в московском пилоте укажите Москва.',
     'deadline': 'До какой даты планируем? Формат ГГГГ-ММ-ДД, не дальше 90 дней.',
     'availability': 'Свободные дни через запятую: ГГГГ-ММ-ДД или дни недели 1–7 (пн–вс). Время каждого дня по умолчанию 09:00–23:00; его можно изменить в мини‑приложении.',
-    'age': 'Сколько вам лет? Нужно для возрастного ограничения.',
+    'age': 'Сколько вам лет? Укажите возраст от 14 до 22 лет включительно.',
     'weights': 'Интересы: категория=оценка 1–5, через запятую (Спектакли=5, Концерты=4). Названия категорий покажу ниже.',
     'excluded': 'Какие категории исключить? Через запятую или «нет».',
     'maxEvents': 'Сколько событий максимум в плане? От 1 до 4.',
@@ -52,10 +52,18 @@ def callback(text, payload):
     return {'type': 'callback', 'text': text, 'payload': payload}
 
 
+def mini_app_button():
+    # MAX opens the URL bound to the bot, not an arbitrary caller-provided URL.
+    button = {'type': 'open_app', 'text': 'Открыть планы'}
+    if os.getenv('MAX_WEB_APP_ID'):
+        button['web_app'] = os.environ['MAX_WEB_APP_ID']
+    return button
+
+
 def parse_step(step, text, draft):
     text = text.strip()
     if step == 'balance':
-        draft['maxBalance'] = int(text)
+        draft['maxBalance'] = integer(text, 0, 5000, 'Остаток')
     elif step == 'locale':
         draft['localeId'] = text
     elif step == 'deadline':
@@ -70,7 +78,7 @@ def parse_step(step, text, draft):
                 rules.append({'date': part, 'start': '09:00', 'end': '23:00'})
         draft['availability'] = rules
     elif step == 'age':
-        draft['age'] = int(text)
+        draft['age'] = integer(text, 14, 22, 'Возраст')
     elif step == 'weights':
         draft['categoryWeights'] = {name.strip(): int(weight.strip()) for name, weight in (part.split('=', 1) for part in text.split(','))}
     elif step == 'excluded':
@@ -127,11 +135,7 @@ def show_mode(state, mode):
         active = selected.get('mode') == mode and not selected.get('needsConfirmation')
         buttons.append([callback('Выбран для напоминаний ✓' if active else 'Напоминать об этом плане', 'choose:' + mode)])
     buttons.append([callback('Напоминания ' + ('✓' if state['remindersEnabled'] else '+'), 'remind:toggle')])
-    # open_app uses URL configured in MAX bot settings, never an untrusted URL.
-    app_button = {'type':'open_app','text':'Открыть планы'}
-    if os.getenv('MAX_WEB_APP_ID'):
-        app_button['web_app'] = os.environ['MAX_WEB_APP_ID']
-    buttons.append([app_button])
+    buttons.append([mini_app_button()])
     return '\n\n'.join(lines), buttons
 
 
@@ -190,7 +194,7 @@ class Bot:
         row = self.store.user(key)
         if text in ('/start','/help'):
             demo_note = ' Демо-набор вымышленный.' if self.service.store.meta().get('kind') == 'simulated' else ''
-            self.client.send(uid, 'Привет! «Пушка‑план» составляет план событий под ваш вручную указанный остаток и свободное время. /plan — начать, /show — планы, /cancel — отменить ввод. План предварительный: сеанс, цену и билеты нужно проверить на сайте источника.' + demo_note, [[{'type':'message','text':'/plan'}]])
+            self.client.send(uid, 'Привет! «Пушка‑план» составляет план событий под ваш вручную указанный остаток и свободное время. Откройте мини-приложение кнопкой «Открыть планы», заполните профиль и сравните варианты. /plan — заполнить профиль в чате, /show — планы, /cancel — отменить ввод. План предварительный: сеанс, цену и билеты нужно проверить на сайте источника.' + demo_note, [[mini_app_button()], [{'type':'message','text':'/plan'}]])
             return
         if text == '/cancel':
             self.store.update_user(key, stage=None, draft=None)

@@ -167,6 +167,35 @@ test('deadline, integer balance and event limits are validated visibly without c
   expect(requests).toHaveLength(0);
 });
 
+test('card profile enforces inclusive age 14–22 and balance up to 5000', async ({ page }) => {
+  await start(page);
+  const requests = track(page, '/api/profile');
+  await page.locator('#btn-edit-profile').click();
+  await expect(page.locator('#f-age')).toHaveAttribute('min', '14');
+  await expect(page.locator('#f-age')).toHaveAttribute('max', '22');
+  await expect(page.locator('#f-balance')).toHaveAttribute('max', '5000');
+  for (const age of ['13', '23']) {
+    await page.locator('#f-age').fill(age);
+    await page.locator('#profile-form button[type=submit]').click();
+    await expect(page.locator('#profile-error')).toContainText('от 14 до 22');
+  }
+  await page.locator('#f-age').fill('18');
+  await page.locator('#f-balance').fill('5001');
+  await page.locator('#profile-form button[type=submit]').click();
+  await expect(page.locator('#profile-error')).toContainText('до 5000');
+  expect(requests).toHaveLength(0);
+  for (const age of ['14', '22']) {
+    await page.locator('#f-age').fill(age);
+    await page.locator('#f-balance').fill('5000');
+    await page.locator('#profile-form button[type=submit]').click();
+    await expect(page.locator('#profile-form')).not.toBeVisible();
+    const state = await (await page.request.get('/api/state')).json();
+    expect(state.profile.age).toBe(Number(age));
+    expect(state.profile.maxBalance).toBe(5000);
+    await page.locator('#btn-edit-profile').click();
+  }
+});
+
 test('server profile errors stay in the form with edits preserved', async ({ page }) => {
   await start(page);
   await page.locator('#btn-edit-profile').click();

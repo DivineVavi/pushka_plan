@@ -20,7 +20,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, build_opener, HTTPCookieProcessor
 from http.cookiejar import CookieJar
 import threading
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from pushka.setup_max import main as setup_max_main
 
 NOW = datetime(2026, 9, 27, 10, tzinfo=timezone.utc)
@@ -164,6 +164,29 @@ class ServiceTests(unittest.TestCase):
 
     def tearDown(self):
         self.tmp.cleanup()
+
+    def test_card_profile_bounds(self):
+        for age in (14, 22):
+            for balance in (0, 5000):
+                clean = validate_profile({**self.profile, 'age': age, 'maxBalance': balance})
+                self.assertEqual((clean['age'], clean['maxBalance']), (age, balance))
+        for age in (13, 23):
+            with self.assertRaisesRegex(Invalid, '14 до 22'):
+                validate_profile({**self.profile, 'age': age})
+        for balance in (-1, 5001):
+            with self.assertRaisesRegex(Invalid, '0 до 5000'):
+                validate_profile({**self.profile, 'maxBalance': balance})
+
+    def test_bot_start_opens_mini_app_without_chat_profile(self):
+        client = Mock()
+        with patch.dict(os.environ, {'MAX_WEB_APP_ID': 'fixture-app'}):
+            Bot(self.store, self.service, client).handle({'update_type': 'bot_started', 'user': {'user_id': 1234}})
+        client.send.assert_called_once()
+        uid, text, buttons = client.send.call_args.args
+        self.assertEqual(uid, 1234)
+        self.assertIn('мини-приложение', text)
+        self.assertEqual(buttons[0], [{'type': 'open_app', 'text': 'Открыть планы', 'web_app': 'fixture-app'}])
+        self.assertIsNone(self.service.state('max:1234')['profile'])
 
     def test_persistence_purchase_idempotency_and_replan(self):
         state = self.service.save_profile('user1', self.profile)
