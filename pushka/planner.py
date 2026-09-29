@@ -123,7 +123,9 @@ def candidates(profile, records, now, balance, purchased=()):
                             reasons = [f"Интерес «{row['category']}»: {weight}/5", 'Сеанс полностью попадает в свободное окно', 'Плановая цена укладывается в остаток']
                             if km is not None:
                                 reasons.append(f'Расстояние ≈ {km:.1f} км')
-                            item = {key: row[key] for key in ('id','eventId','title','category','startsAt','endsAt','timezone','saleLink','exactPriceKnown')}
+                            # The event's own rating (e.g. 12+) is carried for display; it stays
+                            # separate from Pushkin Card holder eligibility (14-22), which never gates candidates.
+                            item = {key: row[key] for key in ('id','eventId','title','category','ageRestriction','startsAt','endsAt','timezone','saleLink','exactPriceKnown')}
                             item.update(source=row['source'], sourceUrl=row.get('sourceUrl'), endEstimated=bool(row.get('endEstimated')), venue={'name': row['venueName'], 'address': row['address']}, price=row['minPrice'], fetchedAt=row.get('fetchedAt'),
                                         interestWeight=weight, score=interest + time_score + affordability + distance_score, reasons=reasons)
                             selected.append(item)

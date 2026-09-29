@@ -226,6 +226,7 @@ input, select {
   font: inherit;
   font-size: 0.95rem;
   width: 100%;
+  min-width: 0;
   border: 1px solid var(--line);
   background: #fff;
   border-radius: 12px;
@@ -253,6 +254,22 @@ input:focus, select:focus {
 .form-group legend { padding: 0; font-size: 0.9rem; font-weight: 700; }
 
 .form-hint { margin: 0; font-size: 0.8rem; color: var(--ink-soft); line-height: 1.5; }
+
+.form-error {
+  margin: 0;
+  grid-column: 1 / -1;
+  padding: 10px 12px;
+  border: 1px solid #f5cccc;
+  border-radius: 12px;
+  background: var(--red-soft);
+  color: var(--red);
+  font-size: 0.88rem;
+  scroll-margin-top: 90px;
+}
+
+input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--red); }
+#auth-required h2 { margin: 0; font-size: 1.15rem; }
+#auth-required p { color: var(--ink-soft); }
 
 .form-advanced { border: 1px dashed var(--line); border-radius: 12px; padding: 10px 14px; }
 .form-advanced summary { cursor: pointer; font-weight: 600; font-size: 0.88rem; color: var(--ink-soft); }
@@ -423,7 +440,8 @@ input:focus, select:focus {
   padding: 12px 16px;
 }
 
-.plans__toolbar-right { display: flex; align-items: center; gap: 10px; }
+.plans__toolbar-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.reminders-control { display: flex; flex-direction: column; gap: 8px; }
 
 .balance-chip {
   background: var(--accent-soft);
@@ -469,6 +487,9 @@ input:focus, select:focus {
 .switch input:checked + .switch__track::after { transform: translateX(18px); }
 .switch input:focus-visible + .switch__track { outline: 2px solid var(--accent); outline-offset: 2px; }
 .switch__label { font-size: 0.85rem; font-weight: 600; color: var(--ink); }
+.switch.is-unavailable { cursor: not-allowed; }
+.switch.is-unavailable .switch__label { color: var(--ink-soft); }
+.switch input:disabled + .switch__track { background: #d9d4e6; opacity: 0.6; }
 
 /* plan view */
 
@@ -477,7 +498,7 @@ input:focus, select:focus {
 .plan-head__title { margin: 0; font-size: 1.2rem; }
 .plan-head__desc { margin: 4px 0 0; color: var(--ink-soft); font-size: 0.88rem; }
 
-.plan-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 2px; }
+.plan-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 2px; }
 
 .stat {
   background: var(--card);
@@ -493,7 +514,6 @@ input:focus, select:focus {
 
 .stat__value { font-weight: 800; font-size: 1.02rem; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stat__label { font-size: 0.68rem; color: var(--ink-soft); }
-.stat--accent .stat__value { color: var(--accent); }
 .stat--green .stat__value { color: var(--green); }
 
 .plan-selection { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; color: var(--ink-soft); font-size: 0.84rem; }
@@ -597,24 +617,8 @@ input:focus, select:focus {
 .event-card__reasons li::marker { color: var(--accent); }
 
 .event-card__freshness { font-size: 0.72rem; color: var(--ink-soft); }
-.event-card__foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.event-card__foot { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
 .event-card__actions { display: flex; gap: 8px; flex-wrap: wrap; }
-
-.score { display: inline-flex; align-items: center; gap: 6px; font-size: 0.74rem; color: var(--ink-soft); font-weight: 600; }
-
-.score__bar {
-  width: 64px;
-  height: 6px;
-  border: 0;
-  border-radius: 999px;
-  appearance: none;
-  background: #e5e1f0;
-  overflow: hidden;
-}
-
-.score__bar::-webkit-progress-bar { background: #e5e1f0; border-radius: 999px; }
-.score__bar::-webkit-progress-value { background: var(--accent); border-radius: 999px; }
-.score__bar::-moz-progress-bar { background: var(--accent); border-radius: 999px; }
 
 .bought-badge {
   display: inline-flex;
@@ -644,6 +648,9 @@ input:focus, select:focus {
   box-shadow: var(--shadow);
 }
 
+.plan-exclusions { text-align: left; font-size: 0.84rem; }
+.plan-exclusions ul { margin: 6px 0; padding-left: 20px; }
+.plan-exclusions p:last-child { font-size: 0.75rem; }
 .plan-empty__icon { font-size: 2rem; }
 .plan-empty h3 { margin: 0; color: var(--ink); font-size: 1.05rem; }
 .plan-empty p { margin: 0 0 8px; max-width: 44ch; font-size: 0.9rem; }
@@ -663,19 +670,6 @@ input:focus, select:focus {
 
 .source-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--green); }
 .source-dot--stale { background: #d97706; }
-
-.diagnostics summary { cursor: pointer; font-weight: 600; color: var(--ink-soft); }
-
-.diagnostics pre {
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 12px;
-  overflow: auto;
-  font-size: 0.72rem;
-  line-height: 1.5;
-  margin: 8px 0 0;
-}
 
 /* ---------- purchase dialog ---------- */
 

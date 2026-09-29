@@ -60,6 +60,37 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual(0, result['diagnostics']['eligibleSessions'])
         self.assertIn('город', result['diagnostics']['excludedBy'])
 
+    def test_age_rating_carried_and_eligibility_lock_unchanged(self):
+        by_id = {row['id']: row['ageRestriction'] for row in self.rows}
+        result = plan(profile(), self.rows, now=NOW)
+        for mode, p in result['plans'].items():
+            self.assertTrue(p['items'], mode)
+            for item in p['items']:
+                self.assertEqual(item['ageRestriction'], by_id[item['id']], mode)
+        # Event rating still gates sessions: a 15-year-old loses 16+ but keeps public 12+ cards.
+        restricted = plan(profile(age=15), self.rows, now=NOW)
+        self.assertIn('возраст', restricted['diagnostics']['excludedBy'])
+        self.assertTrue(all(item['ageRestriction'] == by_id[item['id']] and item['ageRestriction'] <= 15
+                            for p in restricted['plans'].values() for item in p['items']))
+        self.assertTrue(any(item['ageRestriction'] == 12
+                            for p in restricted['plans'].values() for item in p['items']))
+        # The 14-22 cardholder window never gates public cards: a 25-year-old still receives plans.
+        self.assertTrue(all(p['items'] for p in plan(profile(age=25), self.rows, now=NOW)['plans'].values()))
+        public_row = {**self.rows[0], 'source': 'culture-public',
+                      'sourceUrl': 'https://www.culture.ru/events/7219156/koncert-da-zdravstvuet-meksika', 'saleLink': None}
+        public = plan(profile(age=15), [public_row] + self.rows[1:], now=NOW)
+        self.assertTrue(any(item['id'] == public_row['id'] and item['ageRestriction'] == public_row['ageRestriction']
+                            for p in public['plans'].values() for item in p['items']))
+        # Lock behavior unchanged: a purchased item keeps its rating in every mode.
+        first = result['plans']['interest']['items'][0]
+        purchased = [{'sessionId': first['id'], 'actualPrice': first['price'],
+                      'item': {**first, 'price': first['price'], 'purchased': True}}]
+        locked = plan(profile(), self.rows, purchased, NOW)
+        for mode, p in locked['plans'].items():
+            locked_item = next(i for i in p['items'] if i['id'] == first['id'])
+            self.assertTrue(locked_item.get('purchased'), mode)
+            self.assertEqual(locked_item['ageRestriction'], by_id[first['id']], mode)
+
     def test_budget_price_unknown_link_and_approval(self):
         from copy import deepcopy
         rows = deepcopy(self.rows[:4])

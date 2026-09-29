@@ -36,7 +36,7 @@
         <span class="banner__icon" aria-hidden="true">⏳</span>
         <div id="banner-stale-text"></div>
       </div>
-      <div class="banner banner--error" id="banner-error" hidden role="alert">
+      <div class="banner banner--error" id="banner-error" hidden role="alert" tabindex="-1">
         <span class="banner__icon" aria-hidden="true">⚠️</span>
         <div class="banner-error__body">
           <div id="banner-error-text"></div>
@@ -45,7 +45,16 @@
       </div>
     </section>
 
-    <section class="card" id="profile-card">
+    <section class="card" id="auth-required" hidden aria-labelledby="auth-title" tabindex="-1">
+      <h2 id="auth-title">Откройте планы в MAX</h2>
+      <p>Это мини-приложение бота «Пушка-план», а не самостоятельный сайт.
+        Откройте бота в MAX и нажмите «Открыть планы».</p>
+      <p>Если вы уже в MAX, закройте мини-приложение и откройте его заново из бота:
+        данные запуска могли устареть.</p>
+      <a class="btn btn--primary" id="auth-bot-link" href="https://max.ru/t99_hakaton_max_bot" target="_blank" rel="noopener noreferrer">Открыть бота в MAX</a>
+    </section>
+
+    <section class="card" id="profile-card" hidden>
       <div class="card__head">
         <h2>Профиль</h2>
         <button type="button" class="btn btn--ghost btn--sm" id="btn-edit-profile" hidden>Изменить</button>
@@ -62,7 +71,7 @@
         <div class="form-grid">
           <label class="field">
             <span class="field__label">Остаток на карте, ₽ <em>(вводится вручную)</em></span>
-            <input type="number" id="f-balance" min="1" step="1" inputmode="numeric" placeholder="Например, 3200" required>
+            <input type="number" id="f-balance" min="0" max="100000" step="1" inputmode="numeric" placeholder="Например, 3200" required>
           </label>
           <label class="field">
             <span class="field__label">Город</span>
@@ -75,15 +84,15 @@
           </label>
           <label class="field">
             <span class="field__label">Возраст</span>
-            <input type="number" id="f-age" min="1" max="99" step="1" inputmode="numeric" placeholder="18" required>
+            <input type="number" id="f-age" min="0" max="120" step="1" inputmode="numeric" placeholder="18" required>
           </label>
           <label class="field">
             <span class="field__label">Максимум событий в плане</span>
-            <input type="number" id="f-max-events" min="1" max="4" step="1" inputmode="numeric">
+            <input type="number" id="f-max-events" min="1" max="4" step="1" inputmode="numeric" required>
           </label>
           <label class="field">
             <span class="field__label">Запас на дорогу, минут</span>
-            <input type="number" id="f-buffer" min="0" max="240" step="1" inputmode="numeric">
+            <input type="number" id="f-buffer" min="0" max="240" step="1" inputmode="numeric" required>
           </label>
         </div>
 
@@ -108,23 +117,25 @@
 
         <details class="form-advanced">
           <summary>Дополнительно: расстояние</summary>
-          <p class="form-hint">Ограничьте поездку расстоянием от вашей точки. Для расчёта нужны широта и долгота.</p>
+          <p class="form-hint">Для ограничения нужны радиус больше 0 и не больше 500 км и обе координаты.
+            Пустой радиус означает поездку без ограничения расстояния.</p>
           <div class="form-grid">
             <label class="field">
               <span class="field__label">Максимум, км</span>
-              <input type="number" id="f-distance" min="0" step="0.5" inputmode="decimal" placeholder="10">
+              <input type="number" id="f-distance" min="0" max="500" step="any" inputmode="decimal" placeholder="10">
             </label>
             <label class="field">
               <span class="field__label">Широта</span>
-              <input type="number" id="f-lat" step="any" inputmode="decimal" placeholder="55.7558">
+              <input type="number" id="f-lat" min="-90" max="90" step="any" inputmode="decimal" placeholder="55.7558">
             </label>
             <label class="field">
               <span class="field__label">Долгота</span>
-              <input type="number" id="f-lng" step="any" inputmode="decimal" placeholder="37.6173">
+              <input type="number" id="f-lng" min="-180" max="180" step="any" inputmode="decimal" placeholder="37.6173">
             </label>
           </div>
         </details>
 
+        <p class="form-error" id="profile-error" role="alert" tabindex="-1" hidden></p>
         <div class="form-actions">
           <button type="submit" class="btn btn--primary">Сохранить и рассчитать планы</button>
           <button type="button" class="btn btn--ghost" id="btn-cancel-profile" hidden>Отмена</button>
@@ -149,11 +160,16 @@
       </div>
 
       <div class="card plans__toolbar">
-        <label class="switch">
-          <input type="checkbox" id="reminders-toggle">
-          <span class="switch__track" aria-hidden="true"></span>
-          <span class="switch__label">Напоминания о покупке и визите</span>
-        </label>
+        <div class="reminders-control">
+          <label class="switch" id="reminders-control">
+            <input type="checkbox" id="reminders-toggle" aria-describedby="reminders-hint">
+            <span class="switch__track" aria-hidden="true"></span>
+            <span class="switch__label">Напоминания о покупке и визите</span>
+          </label>
+          <p class="form-hint" id="reminders-hint" hidden>Бот MAX не подключён: напоминания не отправляются.
+            В браузерной песочнице эта функция недоступна.
+            <a href="https://max.ru/t99_hakaton_max_bot" target="_blank" rel="noopener noreferrer">Открыть бота в MAX</a>.</p>
+        </div>
         <div class="plans__toolbar-right">
           <span class="balance-chip" id="balance-chip" hidden title="Остаток введён вручную — это не банковский баланс"></span>
           <button type="button" class="btn btn--ghost btn--sm" id="btn-share">Поделиться</button>
@@ -171,10 +187,6 @@
 
     <footer class="app-footer">
       <div class="source-line" id="source-line" hidden></div>
-      <details class="diagnostics" id="diagnostics-block" hidden>
-        <summary>Диагностика</summary>
-        <pre id="diagnostics-pre"></pre>
-      </details>
     </footer>
 
   </main>
@@ -185,9 +197,10 @@
       <p class="purchase__event" id="purchase-event"></p>
       <label class="field">
         <span class="field__label">Фактическая цена, ₽</span>
-        <input type="number" id="purchase-price" min="0" step="1" inputmode="numeric" required>
+        <input type="number" id="purchase-price" min="0" max="100000" step="1" aria-describedby="purchase-hint purchase-error" inputmode="numeric" required>
       </label>
       <p class="form-hint" id="purchase-hint"></p>
+      <p class="form-error" id="purchase-error" role="alert" tabindex="-1" hidden></p>
       <div class="form-actions">
         <button type="button" class="btn btn--ghost" id="purchase-cancel">Отмена</button>
         <button type="submit" class="btn btn--primary" id="purchase-confirm">Сохранить</button>
