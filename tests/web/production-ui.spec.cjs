@@ -120,22 +120,12 @@ test('network purchase errors also stay inside the modal', async ({ page }) => {
   await expect(page.locator('#purchase-error')).toBeInViewport();
 });
 
-test('radius needs two explicit coordinates; zero coordinates are not treated as empty', async ({ page }) => {
+test('legacy distance constraints still explain an empty plan without exposing unfinished location controls', async ({ page }) => {
   await start(page);
-  const requests = track(page, '/api/profile');
-  await page.locator('#btn-edit-profile').click();
-  await page.locator('.form-advanced summary').click();
-  await page.locator('#f-distance').fill('10');
-  await page.locator('#f-lat').fill('');
-  await page.locator('#f-lng').fill('');
-  await page.locator('#profile-form button[type=submit]').click();
-  await expect(page.locator('#profile-error')).toContainText('широт');
-  await expect(page.locator('#profile-error')).toBeInViewport();
-  expect(requests).toHaveLength(0);
-  await page.locator('#f-lat').fill('0');
-  await page.locator('#f-lng').fill('0');
-  await page.locator('#profile-form button[type=submit]').click();
-  await expect(page.locator('#profile-form')).not.toBeVisible();
+  const response = await page.request.put('/api/profile', { data: profile({ maxDistanceKm: 10, latitude: 0, longitude: 0 }) });
+  expect(response.ok()).toBeTruthy();
+  await page.reload();
+  await expect(page.locator('#plans-section')).toBeVisible();
   const state = await (await page.request.get('/api/state')).json();
   expect(state.profile.latitude).toBe(0);
   expect(state.profile.longitude).toBe(0);

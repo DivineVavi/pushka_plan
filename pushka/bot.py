@@ -24,11 +24,13 @@ class MaxClient:
         with urlopen(request, timeout=15, context=self.ssl_context) as response:
             return json.load(response)
 
-    def send(self, uid, text, buttons=None):
+    def send(self, target_id, text, buttons=None, *, target='user_id'):
+        if target not in ('user_id', 'chat_id'):
+            raise ValueError('target must be user_id or chat_id')
         body = {'text': text[:4000]}
         if buttons:
             body['attachments'] = [{'type': 'inline_keyboard', 'payload': {'buttons': buttons}}]
-        return self.call('POST', '/messages', body, {'user_id': uid})
+        return self.call('POST', '/messages', body, {target: target_id})
 
     def answer(self, callback_id, notification='Готово'):
         return self.call('POST', '/answers', {'notification': notification}, {'callback_id': callback_id})
@@ -36,10 +38,10 @@ class MaxClient:
 
 def mini_app_button():
     # MAX opens the URL bound to the bot, not an arbitrary caller-provided URL.
-    button = {'type': 'open_app', 'text': 'Открыть планы'}
-    if os.getenv('MAX_WEB_APP_ID'):
-        button['web_app'] = os.environ['MAX_WEB_APP_ID']
-    return button
+    # The live MAX API rejects open_app without web_app (proto.payload).
+    # This is the bot's public username, not the mini-app HTTPS URL.
+    return {'type': 'open_app', 'text': 'Открыть планы',
+            'web_app': os.getenv('MAX_WEB_APP_ID') or 't99_hakaton_max_bot'}
 
 
 class Bot:
@@ -53,11 +55,18 @@ class Bot:
         cb = update.get('callback') or {}
         message = update.get('message') or cb.get('message') or {}
         recipient = message.get('recipient') or {}
-        sender = (cb.get('user') if kind == 'message_callback' else
-                  message.get('sender') or update.get('user')) or {}
-        uid = sender.get('user_id')
-        chat_type = recipient.get('chat_type', 'dialog')
-        if (isinstance(uid, bool) or not isinstance(uid, int) or uid <= 0 or sender.get('is_bot') or
+        if kind == 'bot_started':
+            sender = update.get('user') or {}
+            target_id, target = update.get('chat_id'), 'chat_id'
+            # bot_started has no Message/Recipient: MAX supplies chat_id on Update.
+            chat_type = 'dialog'
+        else:
+            sender = (cb.get('user') if kind == 'message_callback' else message.get('sender')) or {}
+            target_id, target = sender.get('user_id'), 'user_id'
+            chat_type = recipient.get('chat_type', 'dialog')
+        user_id = sender.get('user_id')
+        if (isinstance(user_id, bool) or not isinstance(user_id, int) or user_id <= 0 or sender.get('is_bot') or
+                isinstance(target_id, bool) or not isinstance(target_id, int) or target_id <= 0 or
                 not isinstance(chat_type, str) or chat_type.lower() != 'dialog'):
             return
         if kind == 'message_callback':
@@ -66,15 +75,17 @@ class Bot:
                 return
             # Old chat buttons must not change profiles, purchases or reminders.
             self.client.answer(cbid, 'Все действия доступны в мини-приложении.')
-        first_entry = kind == 'bot_started' or (message.get('body') or {}).get('text') == '/start'
-        text = ('Привет! Это «Пушка-план». ' if first_entry else '') + (
-            'Все действия доступны в мини-приложении: заполните профиль, сравните планы '
-            'и отметьте покупки. Нажмите «Открыть планы» ниже.\n\n'
-            'План предварительный: сеанс, итоговую цену и наличие билетов проверяйте на странице источника.'
-        )
+        body = message.get('body') or {}
+        first_entry = kind == 'bot_started' or (isinstance(body, dict) and body.get('text') == '/start')
+        text = ('Привет! Это «Пушка-план». Все действия доступны в мини-приложении — '
+                'нажмите «Открыть планы» ниже.' if first_entry else
+                'Бот не принимает сообщения и команды в чате. Все действия доступны только '
+                'в мини-приложении — нажмите «Открыть планы» ниже.')
+        text += ('\n\nПлан предварительный: сеанс, итоговую цену и наличие билетов '
+                 'проверяйте на странице источника.')
         if self.store.meta().get('kind') == 'simulated':
             text += '\n\nДЕМО: события вымышленные, билеты на них не продаются.'
-        self.client.send(uid, text, [[mini_app_button()]])
+        self.client.send(target_id, text, [[mini_app_button()]], target=target)
 
 
 def send_due_reminders(store, service, client, now=None):

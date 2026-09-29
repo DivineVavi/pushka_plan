@@ -1,4 +1,6 @@
 node_modules/
+# Vite production assets are generated into static/ locally and in the Docker build stage.
+static/assets/
 __pycache__/
 *.py[cod]
 *.sqlite3

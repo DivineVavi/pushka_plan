@@ -3,10 +3,13 @@
 **
 !Dockerfile
 !requirements.txt
+!package.json
+!package-lock.json
+!vite.config.mjs
+!frontend/
+!frontend/**
 !pushka/
 !pushka/**
-!static/
-!static/**
 !certs/
 !certs/russian_trusted_root_ca.pem
 !data/

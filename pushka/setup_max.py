@@ -1,4 +1,4 @@
-"""Clear chat commands and register the mini-app entry-point HTTPS webhook."""
+"""Register only /start and subscribe to the mini-app entry-point webhook."""
 import os
 import re
 from urllib.parse import urlparse
@@ -17,7 +17,11 @@ def main():
     if not re.fullmatch(r'[a-zA-Z0-9_-]{5,256}', secret):
         raise SystemExit('MAX_WEBHOOK_SECRET must be 5–256 letters, digits, underscores or hyphens')
     client = MaxClient(token)
+    # Remove any legacy command hints, then expose only /start.
     client.call('PATCH', '/me/commands', {'commands': []})
+    client.call('PATCH', '/me/commands', {'commands': [
+        {'name': 'start', 'description': 'Открыть планы'}
+    ]})
     result = client.call('POST', '/subscriptions', {'url':origin+'/max/webhook',
         'update_types':['message_created','message_callback','bot_started'], 'secret':secret})
     print('MAX webhook registration submitted for:', origin+'/max/webhook',
