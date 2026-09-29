@@ -7,7 +7,8 @@ COPY static/ /app/static/
 COPY data/demo-v1.json data/catalog-snapshot.sqlite3 /app/data/
 COPY requirements.txt /app/requirements.txt
 COPY tests/ /app/tests/
-RUN useradd -r -u 10001 pushka && mkdir -p /var/lib/pushka && chown pushka:pushka /var/lib/pushka
+# Build contexts unpacked with umask 077 must still be readable by the runtime user.
+RUN chmod -R a+rX /app && useradd -r -u 10001 pushka && mkdir -p /var/lib/pushka && chown pushka:pushka /var/lib/pushka
 USER pushka
 EXPOSE 8000
 CMD ["python", "-m", "pushka.server"]
