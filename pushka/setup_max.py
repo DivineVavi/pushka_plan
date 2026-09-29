@@ -1,4 +1,4 @@
-"""Register /plan hints and HTTPS webhook after the bot is configured in MAX."""
+"""Clear chat commands and register the mini-app entry-point HTTPS webhook."""
 import os
 import re
 from urllib.parse import urlparse
@@ -17,12 +17,7 @@ def main():
     if not re.fullmatch(r'[a-zA-Z0-9_-]{5,256}', secret):
         raise SystemExit('MAX_WEBHOOK_SECRET must be 5–256 letters, digits, underscores or hyphens')
     client = MaxClient(token)
-    client.call('PATCH', '/me/commands', {'commands': [
-        {'name':'plan','description':'Составить новый план'},
-        {'name':'show','description':'Показать текущий план'},
-        {'name':'cancel','description':'Отменить ввод'},
-        {'name':'help','description':'Справка'},
-    ]})
+    client.call('PATCH', '/me/commands', {'commands': []})
     result = client.call('POST', '/subscriptions', {'url':origin+'/max/webhook',
         'update_types':['message_created','message_callback','bot_started'], 'secret':secret})
     print('MAX webhook registration submitted for:', origin+'/max/webhook',

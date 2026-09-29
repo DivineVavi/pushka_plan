@@ -31,7 +31,7 @@ class App:
         self.secret = webhook_secret
         self.service = Service(self.store)
         self.client = MaxClient(token) if token else None
-        self.bot = Bot(self.store, self.service, self.client) if token else None
+        self.bot = Bot(self.store, self.client) if token else None
         self.cookie_key = (os.getenv('DEMO_COOKIE_KEY') or self.store.demo_cookie_key()).encode()
         self.source_mode = os.getenv('CULTURE_SOURCE_MODE') or 'snapshot'
         if self.source_mode not in ('snapshot', 'demo', 'culture-public', 'pro-culture'):

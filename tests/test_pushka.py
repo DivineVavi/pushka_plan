@@ -13,7 +13,7 @@ from pushka.catalog import API, demo_rows, normalize_official, sync_official, lo
 from pushka.planner import plan, conflict, public_event_page
 from pushka.service import Invalid, Service, validate_max_init, validate_profile
 from pushka.store import Store
-from pushka.bot import Bot, show_mode, send_due_reminders
+from pushka.bot import Bot, send_due_reminders
 from pushka.server import App, handler
 from http.server import ThreadingHTTPServer
 from urllib.error import HTTPError
@@ -109,12 +109,6 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual(item['sourceUrl'], row['sourceUrl'])
         self.assertIsNone(item['saleLink'])
         self.assertEqual(item['source'], 'culture-public')
-        text, buttons = show_mode({'plans':result['plans'], 'demo':False, 'source':{'kind':'culture-public','stale':False},
-                                   'remindersEnabled':False, 'diagnostics':result['diagnostics']}, 'interest')
-        self.assertIn('Предварительный план', text)
-        self.assertTrue(any(button.get('url') == row['sourceUrl'] and 'Проверить' in button['text']
-                            for group in buttons for button in group))
-        self.assertNotIn('Купить билет', str(buttons))
         for bad in ('http://www.culture.ru/events/7219156/test', 'https://evil.example/events/7219156/test',
                     'https://www.culture.ru.evil.example/events/7219156/test', 'https://www.culture.ru/institutes/25295/test',
                     'https://www.culture.ru@evil.example/events/7219156/test'):
@@ -180,13 +174,16 @@ class ServiceTests(unittest.TestCase):
     def test_bot_start_opens_mini_app_without_chat_profile(self):
         client = Mock()
         with patch.dict(os.environ, {'MAX_WEB_APP_ID': 'fixture-app'}):
-            Bot(self.store, self.service, client).handle({'update_type': 'bot_started', 'user': {'user_id': 1234}})
+            Bot(self.store, client).handle({'update_type': 'bot_started', 'user': {'user_id': 1234}})
         client.send.assert_called_once()
         uid, text, buttons = client.send.call_args.args
         self.assertEqual(uid, 1234)
-        self.assertIn('мини-приложение', text)
-        self.assertEqual(buttons[0], [{'type': 'open_app', 'text': 'Открыть планы', 'web_app': 'fixture-app'}])
-        self.assertIsNone(self.service.state('max:1234')['profile'])
+        self.assertIn('мини-приложении', text)
+        self.assertEqual(buttons, [[{'type': 'open_app', 'text': 'Открыть планы', 'web_app': 'fixture-app'}]])
+        self.assertIn('Привет', text)
+        self.assertIn('ДЕМО', text)
+        with self.store.db() as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM users').fetchone()[0], 0)
 
     def test_persistence_purchase_idempotency_and_replan(self):
         state = self.service.save_profile('user1', self.profile)
@@ -237,8 +234,8 @@ class ServiceTests(unittest.TestCase):
         self.store.update_user('max:42', reminders=1)
         class FakeClient:
             sent = []
-            def send(self, uid, text):
-                self.sent.append((uid,text))
+            def send(self, uid, text, buttons=None):
+                self.sent.append((uid,text,buttons))
         client = FakeClient()
         send_due_reminders(self.store, self.service, client, now)
         self.assertEqual(client.sent, [])  # Viewing a mode does not opt in to its events.
@@ -247,6 +244,9 @@ class ServiceTests(unittest.TestCase):
         send_due_reminders(self.store, self.service, client, now)
         self.assertEqual(len(client.sent),1)
         self.assertIn('Данные устарели',client.sent[0][1])
+        self.assertIn('ДЕМО', client.sent[0][1])
+        self.assertEqual(len(client.sent[0][2]), 1)
+        self.assertEqual(client.sent[0][2][0][0]['type'], 'open_app')
         send_due_reminders(self.store, self.service, client, now)
         self.assertEqual(len(client.sent),1)
         self.service.purchase('max:42', item['id'], item['price'])
@@ -276,8 +276,8 @@ class ServiceTests(unittest.TestCase):
         self.assertTrue(self.service.state('max:42')['selectedPlan']['needsConfirmation'])
         class FakeClient:
             sent = []
-            def send(self, uid, text):
-                self.sent.append((uid,text))
+            def send(self, uid, text, buttons=None):
+                self.sent.append((uid,text,buttons))
         client = FakeClient()
         send_due_reminders(self.store, self.service, client, now)
         self.assertEqual(client.sent, [])
@@ -365,8 +365,8 @@ class AuthAndBotTests(unittest.TestCase):
                             'purchased':[], 'source':{'stale':False}}
             class FakeClient:
                 sent = []
-                def send(self, uid, text):
-                    self.sent.append((uid,text))
+                def send(self, uid, text, buttons=None):
+                    self.sent.append((uid,text,buttons))
             client = FakeClient()
             send_due_reminders(store, FakeService(), client, now)
             self.assertEqual(len(client.sent), 1)
@@ -387,34 +387,52 @@ class AuthAndBotTests(unittest.TestCase):
         with self.assertRaises(Invalid):
             validate_max_init(raw,'token',now+timedelta(hours=2))
 
-    def test_bot_full_chat_flow(self):
+    def test_chat_messages_and_old_callbacks_cannot_change_webapp_state(self):
         with tempfile.TemporaryDirectory() as path:
             db = Store(Path(path)/'bot.db')
             now = datetime.now(timezone.utc)
             db.replace_catalog(demo_rows(now), {'kind':'simulated','label':'Демо','fetchedAt':now.isoformat()})
-            class FakeClient:
-                sent = []
-                def send(self, uid, text, buttons=None):
-                    self.sent.append((uid,text,buttons))
-                def answer(self, cid, notification='Готово'):
-                    pass
-            client = FakeClient()
-            bot = Bot(db, Service(db), client)
-            def msg(text):
-                bot.handle({'update_type':'message_created','message':{'sender':{'user_id':42},'recipient':{'chat_type':'dialog'},'body':{'text':text}}})
-            msg('/plan')
-            for answer in ('3200','Москва',(now+timedelta(days=60)).date().isoformat(),'1,2,3,4,5,6,7','18','Спектакли=5, Выставки=4','нет','4','нет'):
-                msg(answer)
-            state = Service(db).state('max:42')
-            self.assertTrue(state['profile'])
-            self.assertTrue(state['plans']['interest']['items'])
-            self.assertIn('По интересам',client.sent[-1][1])
+            service = Service(db)
+            p = profile(planningDeadline=(now+timedelta(days=60)).date().isoformat())
+            state = service.save_profile('max:42', p)
             sid = state['plans']['interest']['items'][0]['id']
-            bot.handle({'update_type':'message_callback','callback':{'user':{'user_id':42},'callback_id':'choose:1','payload':'choose:interest'},'message':{'recipient':{'chat_type':'dialog'}}})
-            self.assertFalse(Service(db).state('max:42')['selectedPlan']['needsConfirmation'])
-            bot.handle({'update_type':'message_callback','callback':{'user':{'user_id':42},'callback_id':'cb1','payload':'purchased:'+sid},'message':{'recipient':{'chat_type':'dialog'}}})
-            msg('1300')
-            self.assertEqual(len(Service(db).state('max:42')['purchased']),1)
+            service.select_plan('max:42', 'interest')
+            db.update_user('max:42', reminders=1, stage='purchase', draft=json.dumps({'sessionId': sid}))
+            before = db.user('max:42')
+            client = Mock()
+            bot = Bot(db, client)
+            messages = ('/start', '/help', '/plan', '/show', '/cancel', '1300', 'Москва', 'Привет')
+            for text in messages:
+                bot.handle({'update_type':'message_created','message':{'sender':{'user_id':42},
+                    'recipient':{'chat_type':'dialog'},'body':{'text':text}}})
+            payloads = ('mode:spend', 'choose:more', 'purchased:' + sid, 'remind:toggle')
+            for i, payload in enumerate(payloads):
+                bot.handle({'update_type':'message_callback', 'callback':{'user':{'user_id':42},
+                    'callback_id':str(i), 'payload':payload, 'message':{'recipient':{'chat_type':'dialog'}}}})
+            self.assertEqual(db.user('max:42'), before)
+            self.assertEqual(db.purchases('max:42'), [])
+            self.assertEqual(client.send.call_count, len(messages) + len(payloads))
+            self.assertEqual(client.answer.call_count, len(payloads))
+            for call in client.send.call_args_list:
+                uid, text, buttons = call.args
+                self.assertEqual(uid, 42)
+                self.assertIn('мини-приложении', text)
+                self.assertNotIn('/plan', text)
+                self.assertEqual(len(buttons), 1)
+                self.assertEqual(len(buttons[0]), 1)
+                self.assertEqual(buttons[0][0]['type'], 'open_app')
+
+    def test_bot_ignores_groups_bot_senders_and_invalid_updates(self):
+        client = Mock()
+        bot = Bot(Mock(), client)
+        for sender, recipient in (({'user_id':42}, {'chat_type':'chat'}),
+                                  ({'user_id':True}, {}), ({'user_id':0}, {}), ({}, {}),
+                                  ({'user_id':42, 'is_bot':True}, {})):
+            bot.handle({'update_type':'message_created', 'message':{'sender':sender, 'recipient':recipient}})
+        bot.handle({'update_type':'message_callback', 'callback':{'user':{'user_id':42}}})
+        bot.handle({'update_type':'message_removed', 'user':{'user_id':42}})
+        client.send.assert_not_called()
+        client.answer.assert_not_called()
 
 
 class ProductionAuthTests(unittest.TestCase):
@@ -473,6 +491,8 @@ class SetupMaxTests(unittest.TestCase):
             with patch('pushka.setup_max.MaxClient') as client, patch('builtins.print'):
                 setup_max_main()
                 self.assertEqual(client.return_value.call.call_count, 2)
+                self.assertEqual(client.return_value.call.call_args_list[0].args,
+                                 ('PATCH', '/me/commands', {'commands': []}))
                 self.assertEqual(client.return_value.call.call_args.args[:2], ('POST','/subscriptions'))
                 self.assertEqual(client.return_value.call.call_args.args[2]['url'],
                                  'https://demo.apigw.yandexcloud.net/max/webhook')
