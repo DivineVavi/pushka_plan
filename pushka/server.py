@@ -3,6 +3,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import secrets
 import threading
 import time
@@ -20,7 +21,25 @@ from .store import Store
 from .snapshot import DEFAULT_SNAPSHOT, load_catalog_snapshot
 
 ROOT = Path(__file__).resolve().parent.parent
-MIMES = {'.html':'text/html; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.css':'text/css; charset=utf-8'}
+STATIC_ROOT = ROOT / 'static'
+ASSET_FILENAME = re.compile(r'[A-Za-z0-9_][A-Za-z0-9._-]*\Z', re.ASCII)
+MIMES = {
+    '.html': 'text/html; charset=utf-8',
+    '.js': 'text/javascript; charset=utf-8',
+    '.css': 'text/css; charset=utf-8',
+    '.svg': 'image/svg+xml',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.webp': 'image/webp',
+    '.gif': 'image/gif',
+    '.ico': 'image/x-icon',
+    '.woff': 'font/woff',
+    '.woff2': 'font/woff2',
+    '.ttf': 'font/ttf',
+    '.otf': 'font/otf',
+    '.json': 'application/json; charset=utf-8',
+}
 log = logging.getLogger(__name__)
 
 
@@ -144,11 +163,27 @@ def handler(app):
             self.send_header('X-Content-Type-Options', 'nosniff')
             self.send_header('Referrer-Policy', 'no-referrer')
             self.send_header('Cache-Control', 'no-store')
-            self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self' https://st.max.ru; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors https://max.ru https://*.max.ru")
+            self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self' https://st.max.ru; style-src 'self'; style-src-attr 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors https://max.ru https://*.max.ru")
             if cookie:
                 self.send_header('Set-Cookie', cookie + ('; Secure' if self.headers.get('X-Forwarded-Proto') == 'https' else ''))
             self.end_headers()
             self.wfile.write(content)
+
+        def static_file(self, relative_path):
+            root = STATIC_ROOT.resolve()
+            try:
+                candidate = (root / relative_path).resolve(strict=True)
+                candidate.relative_to(root)
+            except (OSError, RuntimeError, ValueError):
+                return self.send(404, {'error':'Not found'})
+            if not candidate.is_file():
+                return self.send(404, {'error':'Not found'})
+            content_type = MIMES.get(candidate.suffix.lower(), 'application/octet-stream')
+            try:
+                content = candidate.read_bytes()
+            except OSError:
+                return self.send(404, {'error':'Not found'})
+            return self.send(200, content, content_type)
 
         def execute(self):
             method = self.command
@@ -201,10 +236,14 @@ def handler(app):
                     return self.send(401, {'error':str(exc)})
                 data = self.body() if method != 'GET' else None
                 return self.send(200, app.dispatch(method, path, data, uid), cookie=cookie)
+            if method == 'GET' and path.startswith('/assets/'):
+                filename = path[len('/assets/'):]
+                if not ASSET_FILENAME.fullmatch(filename) or '..' in filename:
+                    return self.send(404, {'error':'Not found'})
+                return self.static_file('assets/' + filename)
             if method == 'GET' and path in ('/','/index.html','/app.js','/style.css'):
                 name = 'index.html' if path == '/' else path[1:]
-                p = ROOT / 'static' / name
-                return self.send(200, p.read_bytes(), MIMES[p.suffix])
+                return self.static_file(name)
             self.send(404, {'error':'Not found'})
 
         def body(self):

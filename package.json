@@ -1,10 +1,18 @@
 {
-  "name": "pushka-plan-ui-tests",
+  "name": "pushka-plan",
   "private": true,
   "scripts": {
-    "test:ui": "playwright test"
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "test:ui": "npm run build && playwright test"
   },
   "devDependencies": {
-    "@playwright/test": "1.63.0"
+    "@playwright/test": "1.63.0",
+    "vite": "8.3.1"
+  },
+  "dependencies": {
+    "@maxhub/max-ui": "0.5.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
   }
 }
