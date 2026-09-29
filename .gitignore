@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*.sqlite3
+*.sqlite3-*
+.env
+.pi/
+.scratch/
+docs/
+AGENTS.md
+*.pdf
+*:Zone.Identifier
+*.log
+*.pid

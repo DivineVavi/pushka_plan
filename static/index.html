@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <title>Пушка-план — план событий по Пушкинской карте</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <header class="app-header">
+    <div class="app-header__inner">
+      <div class="brand">
+        <span class="brand__mark" aria-hidden="true">П</span>
+        <div class="brand__text">
+          <strong>Пушка-план</strong>
+          <span>план событий по Пушкинской карте</span>
+        </div>
+      </div>
+      <span class="badge badge--demo" id="demo-badge" hidden>демо</span>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <section class="banners" id="banners" hidden aria-live="polite">
+      <div class="banner banner--demo" id="banner-demo" hidden>
+        <span class="banner__icon" aria-hidden="true">🧪</span>
+        <div>
+          <strong>Демо-режим.</strong> События смоделированы и не получены из официального источника.
+          Билеты на эти события не продаются. Кнопка «Купил» лишь имитирует покупку для демонстрации пересчёта.
+        </div>
+      </div>
+      <div class="banner banner--warn" id="banner-stale" hidden>
+        <span class="banner__icon" aria-hidden="true">⏳</span>
+        <div id="banner-stale-text"></div>
+      </div>
+      <div class="banner banner--error" id="banner-error" hidden role="alert">
+        <span class="banner__icon" aria-hidden="true">⚠️</span>
+        <div class="banner-error__body">
+          <div id="banner-error-text"></div>
+          <button type="button" class="btn btn--ghost btn--sm" id="btn-retry">Повторить</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" id="profile-card">
+      <div class="card__head">
+        <h2>Профиль</h2>
+        <button type="button" class="btn btn--ghost btn--sm" id="btn-edit-profile" hidden>Изменить</button>
+      </div>
+
+      <div id="profile-summary" class="profile-summary" hidden></div>
+
+      <form id="profile-form" class="profile-form" novalidate hidden>
+        <p class="form-intro" id="form-intro" hidden>
+          Введите остаток на Пушкинской карте, город, дедлайн, свободное время и интересы —
+          мы подберём сочетание событий и покажем три варианта плана.
+        </p>
+
+        <div class="form-grid">
+          <label class="field">
+            <span class="field__label">Остаток на карте, ₽ <em>(вводится вручную)</em></span>
+            <input type="number" id="f-balance" min="1" step="1" inputmode="numeric" placeholder="Например, 3200" required>
+          </label>
+          <label class="field">
+            <span class="field__label">Город</span>
+            <select id="f-locale"></select>
+            <input type="text" id="f-locale-text" placeholder="Например, Москва" hidden>
+          </label>
+          <label class="field">
+            <span class="field__label">Успеть до</span>
+            <input type="date" id="f-deadline" required>
+          </label>
+          <label class="field">
+            <span class="field__label">Возраст</span>
+            <input type="number" id="f-age" min="1" max="99" step="1" inputmode="numeric" placeholder="18" required>
+          </label>
+          <label class="field">
+            <span class="field__label">Максимум событий в плане</span>
+            <input type="number" id="f-max-events" min="1" max="4" step="1" inputmode="numeric">
+          </label>
+          <label class="field">
+            <span class="field__label">Запас на дорогу, минут</span>
+            <input type="number" id="f-buffer" min="0" max="240" step="1" inputmode="numeric">
+          </label>
+        </div>
+
+        <fieldset class="form-group">
+          <legend>Свободное время</legend>
+          <p class="form-hint">Добавьте окна, когда вы можете пойти на событие: конкретные даты или повторяющиеся дни недели.</p>
+          <div class="avail-rows" id="availability-rows"></div>
+          <button type="button" class="btn btn--ghost btn--sm" id="btn-add-window">＋ Добавить окно</button>
+        </fieldset>
+
+        <fieldset class="form-group" id="weights-group">
+          <legend>Интересы</legend>
+          <p class="form-hint">Отметьте важность каждой категории: 1 — совсем не интересует, 5 — главный интерес.</p>
+          <div id="category-weights"></div>
+        </fieldset>
+
+        <fieldset class="form-group" id="excluded-group">
+          <legend>Исключить категории</legend>
+          <p class="form-hint">События отмеченных категорий не попадут в план.</p>
+          <div class="chips" id="excluded-categories"></div>
+        </fieldset>
+
+        <details class="form-advanced">
+          <summary>Дополнительно: расстояние</summary>
+          <p class="form-hint">Ограничьте поездку расстоянием от вашей точки. Для расчёта нужны широта и долгота.</p>
+          <div class="form-grid">
+            <label class="field">
+              <span class="field__label">Максимум, км</span>
+              <input type="number" id="f-distance" min="0" step="0.5" inputmode="decimal" placeholder="10">
+            </label>
+            <label class="field">
+              <span class="field__label">Широта</span>
+              <input type="number" id="f-lat" step="any" inputmode="decimal" placeholder="55.7558">
+            </label>
+            <label class="field">
+              <span class="field__label">Долгота</span>
+              <input type="number" id="f-lng" step="any" inputmode="decimal" placeholder="37.6173">
+            </label>
+          </div>
+        </details>
+
+        <div class="form-actions">
+          <button type="submit" class="btn btn--primary">Сохранить и рассчитать планы</button>
+          <button type="button" class="btn btn--ghost" id="btn-cancel-profile" hidden>Отмена</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card card--empty" id="empty-card" hidden>
+      <div class="empty__icon" aria-hidden="true">🗓️</div>
+      <h2 id="empty-title">Планы ещё не рассчитаны</h2>
+      <p id="empty-text"></p>
+      <button type="button" class="btn btn--primary" id="btn-empty-action">Пересчитать планы</button>
+    </section>
+
+    <section class="plans" id="plans-section" hidden>
+      <div class="card card--tabs">
+        <div class="tabs" role="tablist" id="tabs" aria-label="Варианты плана">
+          <button type="button" role="tab" data-plan="interest">По интересам</button>
+          <button type="button" role="tab" data-plan="more">Больше впечатлений</button>
+          <button type="button" role="tab" data-plan="spend">Почти без остатка</button>
+        </div>
+      </div>
+
+      <div class="card plans__toolbar">
+        <label class="switch">
+          <input type="checkbox" id="reminders-toggle">
+          <span class="switch__track" aria-hidden="true"></span>
+          <span class="switch__label">Напоминания о покупке и визите</span>
+        </label>
+        <div class="plans__toolbar-right">
+          <span class="balance-chip" id="balance-chip" hidden title="Остаток введён вручную — это не банковский баланс"></span>
+          <button type="button" class="btn btn--ghost btn--sm" id="btn-share">Поделиться</button>
+        </div>
+      </div>
+
+      <div id="plan-views"></div>
+
+      <p class="plans__note">
+        План предварительный: опубликованные даты и цены «от» не гарантируют билет и итоговую стоимость.
+        Для событий Культура.РФ сначала проверьте расписание, возможность оплаты картой и билеты на странице источника.
+        Баланс введён вручную и не является банковским балансом; покупку подтверждаете только вы.
+      </p>
+    </section>
+
+    <footer class="app-footer">
+      <div class="source-line" id="source-line" hidden></div>
+      <details class="diagnostics" id="diagnostics-block" hidden>
+        <summary>Диагностика</summary>
+        <pre id="diagnostics-pre"></pre>
+      </details>
+    </footer>
+
+  </main>
+
+  <dialog id="purchase-dialog">
+    <form id="purchase-form" novalidate>
+      <h3 class="purchase__title">Отметить покупку</h3>
+      <p class="purchase__event" id="purchase-event"></p>
+      <label class="field">
+        <span class="field__label">Фактическая цена, ₽</span>
+        <input type="number" id="purchase-price" min="0" step="1" inputmode="numeric" required>
+      </label>
+      <p class="form-hint" id="purchase-hint"></p>
+      <div class="form-actions">
+        <button type="button" class="btn btn--ghost" id="purchase-cancel">Отмена</button>
+        <button type="submit" class="btn btn--primary" id="purchase-confirm">Сохранить</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="https://st.max.ru/js/max-web-app.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

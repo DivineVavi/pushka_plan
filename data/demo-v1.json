@@ -1,0 +1,15 @@
+{
+  "version": "demo-v1", "kind": "simulated", "sourceUrl": "https://pro.culture.ru/documentation/export_API_PRO.pdf",
+  "disclaimer": "Учебные вымышленные события, НЕ официальная выгрузка и НЕ доступные для покупки билеты. Используются только для проверки сценария без ключа PRO.Культура.РФ.",
+  "localeId": "Москва", "timezone": "Europe/Moscow",
+  "events": [
+    {"id":"stage-1","title":"Спектакль «Черновик» (демо)","category":"Спектакли","ageRestriction":12,"venue":"Учебная сцена А","address":"Центр Москвы (демо)","latitude":55.7558,"longitude":37.6173,"price":1200,"days":7,"hour":18,"duration":120},
+    {"id":"exhibit-1","title":"Выставка «Линии» (демо)","category":"Выставки","ageRestriction":6,"venue":"Учебный музей","address":"Центр Москвы (демо)","latitude":55.7658,"longitude":37.6273,"price":600,"days":8,"hour":12,"duration":90},
+    {"id":"concert-1","title":"Концерт «Ритм» (демо)","category":"Концерты","ageRestriction":12,"venue":"Учебный зал","address":"Центр Москвы (демо)","latitude":55.7458,"longitude":37.6073,"price":1300,"days":14,"hour":19,"duration":120},
+    {"id":"stage-2","title":"Спектакль «Встреча» (демо)","category":"Спектакли","ageRestriction":16,"venue":"Учебная сцена Б","address":"Центр Москвы (демо)","latitude":55.7758,"longitude":37.6373,"price":1800,"days":15,"hour":18,"duration":120},
+    {"id":"cinema-1","title":"Кинопоказ «Кадр» (демо)","category":"Кино","ageRestriction":12,"venue":"Учебный кинозал","address":"Центр Москвы (демо)","latitude":55.7558,"longitude":37.6173,"price":500,"days":21,"hour":18,"duration":110},
+    {"id":"excursion-1","title":"Экскурсия «Город» (демо)","category":"Экскурсии","ageRestriction":6,"venue":"Учебная площадка","address":"Центр Москвы (демо)","latitude":55.7558,"longitude":37.6173,"price":900,"days":22,"hour":13,"duration":90},
+    {"id":"concert-2","title":"Концерт «Ноты» (демо)","category":"Концерты","ageRestriction":12,"venue":"Учебный зал","address":"Центр Москвы (демо)","latitude":55.7458,"longitude":37.6073,"price":800,"days":28,"hour":16,"duration":90},
+    {"id":"exhibit-2","title":"Выставка «Свет» (демо)","category":"Выставки","ageRestriction":6,"venue":"Учебный музей","address":"Центр Москвы (демо)","latitude":55.7658,"longitude":37.6273,"price":700,"days":28,"hour":16,"duration":90}
+  ]
+}

@@ -1,0 +1,31 @@
+services:
+  pushka:
+    build: .
+    restart: unless-stopped
+    environment:
+      PUSHKA_DB: /var/lib/pushka/pushka.sqlite3
+      MAX_BOT_TOKEN: ${MAX_BOT_TOKEN:-}
+      MAX_WEBHOOK_SECRET: ${MAX_WEBHOOK_SECRET:-}
+      MAX_WEB_APP_ID: ${MAX_WEB_APP_ID:-}
+      PUBLIC_URL: ${PUBLIC_URL:-}
+      PRO_API_KEY: ${PRO_API_KEY:-}
+      PRO_SNAPSHOT_PATH: ${PRO_SNAPSHOT_PATH:-}
+      PRO_LOCALE_IDS: ${PRO_LOCALE_IDS:-}
+      CULTURE_SOURCE_MODE: ${CULTURE_SOURCE_MODE:-}
+      CULTURE_PROXY_HOST: ${CULTURE_PROXY_HOST:-pool.proxy.market}
+      CULTURE_PROXY_PORT: ${CULTURE_PROXY_PORT:-10000}
+      CULTURE_PROXY_USER: ${CULTURE_PROXY_USER:-}
+      CULTURE_PROXY_PASSWORD: ${CULTURE_PROXY_PASSWORD:-}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      DEMO_COOKIE_KEY: ${DEMO_COOKIE_KEY:-}
+    ports:
+      - "${PUSHKA_BIND_IP:-127.0.0.1}:${PUSHKA_HOST_PORT:-8000}:8000"
+    volumes:
+      - pushka-data:/var/lib/pushka
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+volumes:
+  pushka-data:
