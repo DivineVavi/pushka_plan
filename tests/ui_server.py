@@ -10,13 +10,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from pushka.server import App, handler
-from pushka.catalog import demo_rows
+from catalog_fixture import demo_rows
 
 
 def main():
     artifacts = ROOT / '.pi'
     artifacts.mkdir(exist_ok=True)
-    os.environ['CULTURE_SOURCE_MODE'] = 'snapshot'
     os.environ['DEMO_COOKIE_KEY'] = 'ui-test-only-key-not-for-deployment'
     os.environ.pop('CATALOG_SNAPSHOT_PATH', None)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))

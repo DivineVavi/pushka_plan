@@ -9,11 +9,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
-from pushka.catalog import API, demo_rows, normalize_official, sync_official, load_prepared_snapshot
+from catalog_fixture import demo_rows
 from pushka.planner import plan, conflict, public_event_page
 from pushka.service import Invalid, Service, validate_max_init, validate_profile
 from pushka.store import Store
-from pushka.bot import Bot, send_due_reminders
+from pushka.bot import Bot, MaxClient, send_due_reminders
 from pushka.server import App, handler
 from http.server import ThreadingHTTPServer
 from urllib.error import HTTPError
@@ -33,6 +33,23 @@ def profile(**changes):
          'excludedCategories': [], 'age':18, 'maxEvents':4, 'travelBufferMinutes':30}
     p.update(changes)
     return p
+
+
+def prepared_public_rows(now):
+    fetched_at = (now - timedelta(minutes=5)).isoformat()
+    return [{**row, 'source': 'culture-public',
+             'sourceUrl': 'https://www.culture.ru/events/7219156/koncert-da-zdravstvuet-meksika',
+             'exactPriceKnown': False, 'fetchedAt': fetched_at}
+            for row in demo_rows(now)]
+
+
+def replace_with_public_test_catalog(store, now):
+    rows = prepared_public_rows(now)
+    store.replace_catalog(rows, {'kind': 'culture-public-prepared',
+        'label': 'Подготовленный тестовый снимок Культура.РФ',
+        'sourceUrl': 'https://www.culture.ru/afisha/moskva/pushkinskaya-karta',
+        'fetchedAt': rows[0]['fetchedAt']})
+    return rows
 
 
 class PlannerTests(unittest.TestCase):
@@ -174,14 +191,24 @@ class ServiceTests(unittest.TestCase):
     def test_bot_start_opens_mini_app_without_chat_profile(self):
         client = Mock()
         with patch.dict(os.environ, {'MAX_WEB_APP_ID': 'fixture-app'}):
-            Bot(self.store, client).handle({'update_type': 'bot_started', 'user': {'user_id': 1234}})
+            Bot(self.store, client).handle({'update_type': 'bot_started', 'chat_id': 5678,
+                                            'user': {'user_id': 1234}})
         client.send.assert_called_once()
         uid, text, buttons = client.send.call_args.args
-        self.assertEqual(uid, 1234)
+        self.assertEqual(uid, 5678)
+        self.assertEqual(client.send.call_args.kwargs, {'target': 'chat_id'})
         self.assertIn('мини-приложении', text)
         self.assertEqual(buttons, [[{'type': 'open_app', 'text': 'Открыть планы', 'web_app': 'fixture-app'}]])
         self.assertIn('Привет', text)
         self.assertIn('ДЕМО', text)
+        client.reset_mock()
+        with patch.dict(os.environ, {'MAX_WEB_APP_ID': ''}):
+            Bot(self.store, client).handle({'update_type': 'bot_started', 'chat_id': 5678,
+                                            'user': {'user_id': 1234}})
+        self.assertEqual(client.send.call_args.args[2][0][0]['web_app'], 't99_hakaton_max_bot')
+        client.reset_mock()
+        Bot(self.store, client).handle({'update_type': 'bot_started', 'user': {'user_id': 1234}})
+        client.send.assert_not_called()  # bot_started must supply its documented chat_id.
         with self.store.db() as db:
             self.assertEqual(db.execute('SELECT count(*) FROM users').fetchone()[0], 0)
 
@@ -304,51 +331,13 @@ class ServiceTests(unittest.TestCase):
         with self.assertRaises(Invalid):
             self.service.purchase('user1','arbitrary-id',-1)
 
-    def test_atomic_sync_keeps_previous_catalog(self):
-        initial = self.store.catalog()
-        def failed(url):
-            raise OSError('offline')
-        with self.assertRaises(OSError):
-            sync_official(self.store,'secret',now=self.today,fetch=failed)
-        self.assertEqual(initial,self.store.catalog())
-
-    def test_official_sync_paginates_and_preserves_source(self):
-        calls = []
-        def fetch(url):
-            from urllib.parse import parse_qs, urlsplit
-            params = parse_qs(urlsplit(url).query)
-            calls.append(int(params['offset'][0]))
-            sample = {'id':1,'name':'Концерт','category':{'name':'Концерты'},'ageRestriction':12,'statusPushka':True,'isPublished':True,'inAccepted':True,
-                'price':500,'maxPrice':1000,'places':[{'id':3,'name':'Зал','locale':{'id':77},'saleLink':'https://tickets.example/1',
-                'seances':[{'start':int((self.today+timedelta(days=2)).timestamp()*1000),'end':int((self.today+timedelta(days=2,hours=2)).timestamp()*1000)}]}]}
-            return {'events':[sample]}
-        self.assertEqual(sync_official(self.store,'secret',now=self.today,fetch=fetch),1)
-        self.assertEqual(calls,[0])
-        self.assertEqual(self.store.catalog()[0]['raw']['name'],'Концерт')
-        self.assertEqual(self.store.meta()['kind'],'pro-culture')
-
-    def test_prepared_snapshot_is_not_labeled_live(self):
-        path = Path(self.tmp.name)/'prepared.json'
-        sample = {'id':10,'name':'Событие','category':{'name':'Концерты'},'ageRestriction':12,'statusPushka':True,'isPublished':True,'inAccepted':True,
-                  'price':500,'maxPrice':500,'places':[{'id':9,'name':'Зал','locale':{'id':77},'saleLink':'https://tickets.example/10',
-                  'seances':[{'start':int((self.today+timedelta(days=2)).timestamp()*1000),'end':int((self.today+timedelta(days=2,hours=2)).timestamp()*1000)}]}]}
-        path.write_text(json.dumps({'sourceUrl':API,'fetchedAt':self.today.isoformat(),'events':[sample]}))
-        self.assertEqual(load_prepared_snapshot(self.store, path),1)
-        self.assertEqual(self.store.meta()['kind'],'pro-culture-prepared')
-        self.assertEqual(self.store.catalog()[0]['saleLink'],'https://tickets.example/10')
-
-    def test_official_adapter_fails_closed(self):
-        event = {'id':1,'name':'Тест','category':{'name':'Концерты'},'ageRestriction':12,'statusPushka':True,'isPublished':True,'inAccepted':True,
-                 'price':500,'maxPrice':1000,'places':[{'id':3,'name':'Театр','locale':{'id':77,'timezone':'Europe/Moscow'},'saleLink':'https://tickets.example/1',
-                 'seances':[{'start':int((self.today+timedelta(days=2)).timestamp()*1000),'end':int((self.today+timedelta(days=2,hours=2)).timestamp()*1000)}]}]}
-        row = normalize_official(event,self.today.isoformat())[0]
-        self.assertFalse(row['exactPriceKnown'])
-        self.assertEqual(row['minPrice'],500)
-        self.assertEqual(row['localeId'],'77')
-        self.assertEqual(normalize_official({**event,'isPublished':False}, self.today.isoformat()),[])
-
-
 class AuthAndBotTests(unittest.TestCase):
+    def test_max_client_targets_bot_started_chat_id(self):
+        client = MaxClient('token')
+        with patch.object(client, 'call') as call:
+            client.send(5678, 'Привет', target='chat_id')
+        call.assert_called_once_with('POST', '/messages', {'text':'Привет'}, {'chat_id':5678})
+
     def test_reminder_uses_confirmed_mode_not_interest_mode(self):
         with tempfile.TemporaryDirectory() as path:
             store = Store(Path(path)/'bot.db')
@@ -405,19 +394,25 @@ class AuthAndBotTests(unittest.TestCase):
             for text in messages:
                 bot.handle({'update_type':'message_created','message':{'sender':{'user_id':42},
                     'recipient':{'chat_type':'dialog'},'body':{'text':text}}})
+            bot.handle({'update_type':'message_created','message':{'sender':{'user_id':42},
+                'recipient':{'chat_type':'dialog'},'body':{'attachments':[{'type':'image'}]}}})
             payloads = ('mode:spend', 'choose:more', 'purchased:' + sid, 'remind:toggle')
             for i, payload in enumerate(payloads):
                 bot.handle({'update_type':'message_callback', 'callback':{'user':{'user_id':42},
                     'callback_id':str(i), 'payload':payload, 'message':{'recipient':{'chat_type':'dialog'}}}})
             self.assertEqual(db.user('max:42'), before)
             self.assertEqual(db.purchases('max:42'), [])
-            self.assertEqual(client.send.call_count, len(messages) + len(payloads))
+            self.assertEqual(client.send.call_count, len(messages) + 1 + len(payloads))
             self.assertEqual(client.answer.call_count, len(payloads))
-            for call in client.send.call_args_list:
+            for index, call in enumerate(client.send.call_args_list):
                 uid, text, buttons = call.args
                 self.assertEqual(uid, 42)
-                self.assertIn('мини-приложении', text)
+                if index == 0:
+                    self.assertIn('Привет', text)
+                else:
+                    self.assertIn('Бот не принимает сообщения', text)
                 self.assertNotIn('/plan', text)
+                self.assertEqual(call.kwargs, {'target': 'user_id'})
                 self.assertEqual(len(buttons), 1)
                 self.assertEqual(len(buttons[0]), 1)
                 self.assertEqual(buttons[0][0]['type'], 'open_app')
@@ -439,8 +434,8 @@ class ProductionAuthTests(unittest.TestCase):
     def test_http_max_signature_and_webhook_secret(self):
         with tempfile.TemporaryDirectory() as path:
             # Authentication does not depend on the bundled snapshot's calendar dates.
-            with patch.dict(os.environ, {'CULTURE_SOURCE_MODE':'demo'}):
-                app = App(Path(path)/'prod.db','max-token','secret-webhook')
+            app = App(Path(path)/'prod.db','max-token','secret-webhook')
+            replace_with_public_test_catalog(app.store, datetime.now(timezone.utc))
             received = []
             app.bot.handle = received.append
             server = ThreadingHTTPServer(('127.0.0.1',0), handler(app))
@@ -490,19 +485,26 @@ class SetupMaxTests(unittest.TestCase):
                                    'PUBLIC_URL':'https://demo.apigw.yandexcloud.net'}):
             with patch('pushka.setup_max.MaxClient') as client, patch('builtins.print'):
                 setup_max_main()
-                self.assertEqual(client.return_value.call.call_count, 2)
+                self.assertEqual(client.return_value.call.call_count, 3)
                 self.assertEqual(client.return_value.call.call_args_list[0].args,
                                  ('PATCH', '/me/commands', {'commands': []}))
+                self.assertEqual(client.return_value.call.call_args_list[1].args,
+                                 ('PATCH', '/me/commands', {'commands': [
+                                     {'name': 'start', 'description': 'Открыть планы'}
+                                 ]}))
                 self.assertEqual(client.return_value.call.call_args.args[:2], ('POST','/subscriptions'))
-                self.assertEqual(client.return_value.call.call_args.args[2]['url'],
-                                 'https://demo.apigw.yandexcloud.net/max/webhook')
+                subscription = client.return_value.call.call_args.args[2]
+                self.assertEqual(subscription['url'], 'https://demo.apigw.yandexcloud.net/max/webhook')
+                self.assertEqual(subscription['update_types'],
+                                 ['message_created', 'message_callback', 'bot_started'])
+                self.assertEqual(subscription['secret'], 'valid-secret')
 
 
 class HTTPTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        with patch.dict(os.environ, {'CULTURE_SOURCE_MODE':'demo'}):
-            self.app = App(Path(self.tmp.name)/'http.db')
+        self.app = App(Path(self.tmp.name)/'http.db')
+        replace_with_public_test_catalog(self.app.store, datetime.now(timezone.utc))
         self.server = ThreadingHTTPServer(('127.0.0.1',0), handler(self.app))
         self.thread = threading.Thread(target=self.server.serve_forever,daemon=True)
         self.thread.start()
@@ -515,7 +517,43 @@ class HTTPTests(unittest.TestCase):
         self.thread.join(timeout=2)
         self.tmp.cleanup()
 
-    def test_demo_cookie_isolation_and_csrf(self):
+    def test_vite_assets_use_safe_paths_mime_types_and_restricted_csp(self):
+        static_root = Path(self.tmp.name) / 'static'
+        assets = static_root / 'assets'
+        assets.mkdir(parents=True)
+        (static_root / 'index.html').write_text('<!doctype html><div style="color:red"></div>')
+        (assets / 'fixture-chunk.js').write_text('export const ready = true;')
+        (assets / 'fixture-style.css').write_text('.fixture { color: red; }')
+        outside = Path(self.tmp.name) / 'outside.js'
+        outside.write_text('do not serve')
+        (assets / 'linked.js').symlink_to(outside)
+
+        with patch('pushka.server.STATIC_ROOT', static_root):
+            with self.client.open(self.base + '/') as response:
+                self.assertEqual(response.headers.get_content_type(), 'text/html')
+                self.assertEqual(response.headers.get('X-Content-Type-Options'), 'nosniff')
+                policy = response.headers.get('Content-Security-Policy')
+                self.assertIn("style-src 'self'; style-src-attr 'unsafe-inline'", policy)
+                self.assertNotIn("style-src 'self' 'unsafe-inline'", policy)
+            with self.client.open(self.base + '/assets/fixture-chunk.js') as response:
+                self.assertEqual(response.read(), b'export const ready = true;')
+                self.assertEqual(response.headers.get_content_type(), 'text/javascript')
+                self.assertEqual(response.headers.get('X-Content-Type-Options'), 'nosniff')
+            with self.client.open(self.base + '/assets/fixture-style.css') as response:
+                self.assertEqual(response.headers.get_content_type(), 'text/css')
+
+            for path in (
+                '/assets/%2e%2e/outside.js',
+                '/assets/%2e%2e%2foutside.js',
+                '/assets/%252e%252e%252foutside.js',
+                '/assets/subdir/../../outside.js',
+                '/assets/linked.js',
+            ):
+                with self.subTest(path=path), self.assertRaises(HTTPError) as error:
+                    self.client.open(self.base + path)
+                self.assertEqual(error.exception.code, 404)
+
+    def test_cookie_isolation_and_csrf(self):
         def send(client, path, data=None, method=None, origin=None):
             headers = {'Content-Type':'application/json'} if data is not None else {}
             if origin: headers['Origin'] = origin

@@ -1,5 +1,5 @@
 {
-  "version": "demo-v1", "kind": "simulated", "sourceUrl": "https://pro.culture.ru/documentation/export_API_PRO.pdf",
+  "version": "demo-v1", "kind": "simulated", "sourceUrl": "https://example.invalid/test-catalog",
   "disclaimer": "Учебные вымышленные события, НЕ официальная выгрузка и НЕ доступные для покупки билеты. Используются только для проверки сценария без ключа PRO.Культура.РФ.",
   "localeId": "Москва", "timezone": "Europe/Moscow",
   "events": [

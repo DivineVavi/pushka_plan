@@ -12,6 +12,7 @@ from .store import Store
 
 DEFAULT_SNAPSHOT = Path(__file__).resolve().parent.parent / 'data' / 'catalog-snapshot.sqlite3'
 CATALOG_TABLES = ('events', 'venues', 'sessions', 'meta')
+SNAPSHOT_KINDS = ('culture-public', 'culture-public-prepared')
 
 
 def read_snapshot(path):
@@ -30,8 +31,10 @@ def read_snapshot(path):
         count = db.execute('SELECT COUNT(*) FROM sessions').fetchone()[0]
     if not rows or len(rows) != count:
         raise ValueError('Catalogue snapshot is empty or has missing event/venue references')
-    if source.get('kind') not in ('culture-public', 'culture-public-prepared', 'simulated'):
+    if not isinstance(source, dict) or source.get('kind') not in SNAPSHOT_KINDS:
         raise ValueError('Unsupported catalogue snapshot source')
+    if any(row.get('source') != 'culture-public' for row in rows):
+        raise ValueError('Catalogue snapshot contains non-culture-public rows')
     instant(source['fetchedAt'])  # Missing/invalid collection timestamp is not hidden.
     return rows, source
 
@@ -44,11 +47,9 @@ def load_catalog_snapshot(store, path=DEFAULT_SNAPSHOT):
         rows, source = read_snapshot(path)
     except (OSError, sqlite3.Error, ValueError, KeyError, TypeError) as exc:
         raise ValueError('Cannot load catalogue snapshot: check CATALOG_SNAPSHOT_PATH and file integrity') from exc
-    kind = 'simulated' if source['kind'] == 'simulated' else 'culture-public-prepared'
     store.replace_catalog(rows, {
-        'kind': kind,
-        'label': ('Подготовленный учебный снимок: вымышленные события, не для покупки' if kind == 'simulated'
-                  else 'Подготовленный снимок московской афиши Культура.РФ (не живая интеграция)'),
+        'kind': 'culture-public-prepared',
+        'label': 'Подготовленный снимок московской афиши Культура.РФ (не живая интеграция)',
         'sourceUrl': source.get('sourceUrl'),
         'fetchedAt': source['fetchedAt'],
         'lastError': None,
