@@ -3,15 +3,33 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from pushka.catalog import demo_rows
+from catalog_fixture import demo_rows
 from pushka.server import App
 from pushka.snapshot import DEFAULT_SNAPSHOT, export_catalog, load_catalog_snapshot, read_snapshot
 from pushka.store import Store
 from test_pushka import profile
+
+
+@contextmanager
+def block_network():
+    blocked = AssertionError('unexpected network access during snapshot startup')
+    with patch('urllib.request.urlopen', side_effect=blocked) as urlopen, \
+         patch('socket.create_connection', side_effect=blocked) as create_connection, \
+         patch('socket.socket.connect', side_effect=blocked) as socket_connect:
+        yield urlopen, create_connection, socket_connect
+
+
+def prepared_public_rows(now):
+    fetched_at = now.isoformat()
+    return [{**row, 'source':'culture-public',
+             'sourceUrl':'https://www.culture.ru/events/7219156/koncert-da-zdravstvuet-meksika',
+             'fetchedAt':fetched_at, 'exactPriceKnown':False}
+            for row in demo_rows(now)]
 
 
 class SnapshotTests(unittest.TestCase):
@@ -23,13 +41,9 @@ class SnapshotTests(unittest.TestCase):
         self.target = Path(self.tmp.name) / 'application.sqlite3'
         self.now = datetime.now(timezone.utc)
         store = Store(self.source)
-        rows = demo_rows(self.now)
-        for row in rows:
-            row.update(source='culture-public',
-                       sourceUrl='https://www.culture.ru/events/7219156/koncert-da-zdravstvuet-meksika',
-                       fetchedAt=self.now.isoformat(), exactPriceKnown=False)
-        store.replace_catalog(rows, {'kind':'culture-public', 'fetchedAt':self.now.isoformat(),
-                                     'sourceUrl':'https://www.culture.ru/afisha/moskva/pushkinskaya-karta'})
+        self.rows = prepared_public_rows(self.now)
+        store.replace_catalog(self.rows, {'kind':'culture-public-prepared', 'fetchedAt':self.now.isoformat(),
+                                          'sourceUrl':'https://www.culture.ru/afisha/moskva/pushkinskaya-karta'})
         # These must never reach the distributable database, including its free pages.
         store.update_user('private-user', profile='PRIVATE-PROFILE', draft='PRIVATE-DRAFT')
         with store.db() as db:
@@ -37,8 +51,7 @@ class SnapshotTests(unittest.TestCase):
             db.execute("INSERT INTO app_config VALUES ('secret','PRIVATE-SECRET')")
             db.execute("INSERT INTO meta VALUES ('private-extra','\"PRIVATE-METADATA\"')")
         export_catalog(self.source, self.snapshot)
-        self.env = {'CULTURE_SOURCE_MODE':'snapshot', 'CATALOG_SNAPSHOT_PATH':str(self.snapshot),
-                    'MAX_BOT_TOKEN':'', 'MAX_WEBHOOK_SECRET':'', 'DEMO_COOKIE_KEY':'',
+        self.env = {'MAX_BOT_TOKEN':'', 'MAX_WEBHOOK_SECRET':'', 'DEMO_COOKIE_KEY':'',
                     'PRO_API_KEY':'unused-secret', 'PRO_SNAPSHOT_PATH':'must-not-be-opened'}
 
     def test_export_contains_only_catalogue_and_no_private_bytes(self):
@@ -53,53 +66,62 @@ class SnapshotTests(unittest.TestCase):
         # Export did not mutate the source or remove its users.
         self.assertEqual(Store(self.source).user('private-user')['profile'], 'PRIVATE-PROFILE')
 
-    def test_first_start_imports_snapshot_without_source_network(self):
-        with patch.dict(os.environ, self.env), patch('pushka.catalog.urlopen', side_effect=AssertionError('offline')) as network:
+    def test_first_start_imports_snapshot_and_ignores_legacy_source_mode_offline(self):
+        with patch.dict(os.environ, {**self.env, 'CULTURE_SOURCE_MODE':'demo'}), block_network() as network:
             app = App(self.target)
+            self.assertFalse(app.token)
             state = app.state_for_app('judge')
             self.assertEqual(state['source']['kind'], 'culture-public-prepared')
-            self.assertEqual(state['source']['fetchedAt'], self.now.isoformat())
-            self.assertFalse(state['demo'])
-            self.assertEqual(len(app.store.catalog()), 10)
-            network.assert_not_called()
+            self.assertEqual(state['source']['fetchedAt'], '2026-09-28T20:54:34.601079+00:00')
+            self.assertNotEqual(state['source']['kind'], 'simulated')
+            self.assertEqual(len(app.store.catalog()), 6786)
+            for mock in network:
+                mock.assert_not_called()
 
     def test_snapshot_background_does_not_sync_even_if_api_key_is_present(self):
-        with patch.dict(os.environ, self.env), patch('pushka.catalog.urlopen', side_effect=AssertionError('offline')) as network:
+        with patch.dict(os.environ, {**self.env, 'CULTURE_SOURCE_MODE':'pro-culture'}), block_network() as network:
             app = App(self.target)
+            self.assertFalse(app.token)
             with patch('pushka.server.time.sleep', side_effect=[None, StopIteration]):
                 with self.assertRaises(StopIteration):
                     app.background()
-            network.assert_not_called()
+            for mock in network:
+                mock.assert_not_called()
             self.assertEqual(app.store.meta()['kind'], 'culture-public-prepared')
 
     def test_purchase_selected_plan_and_browser_identity_survive_restart(self):
-        with patch.dict(os.environ, self.env):
+        with patch.dict(os.environ, self.env), block_network():
             app = App(self.target)
-            uid, cookie = app.identity({})
-            headers = {'Cookie':cookie.split(';', 1)[0]}
-            p = profile(planningDeadline=(self.now+timedelta(days=60)).date().isoformat())
-            state = app.dispatch('PUT', '/api/profile', p, uid)
-            first = state['plans']['interest']['items'][0]
-            selected = app.dispatch('POST', '/api/selected-plan', {'mode':'interest'}, uid)
-            self.assertFalse(selected['selectedPlan']['needsConfirmation'])
-            bought = app.dispatch('POST', '/api/purchase', {'sessionId':first['id'], 'actualPrice':first['price']+100}, uid)
-            self.assertEqual(bought['remainingBalance'], 3200-first['price']-100)
-            self.snapshot.unlink()  # A restart must not depend on re-importing the seed.
+        app.store.replace_catalog(self.rows, {'kind':'culture-public-prepared',
+            'label':'Подготовленный тестовый снимок Культура.РФ',
+            'sourceUrl':'https://www.culture.ru/afisha/moskva/pushkinskaya-karta',
+            'fetchedAt':self.now.isoformat()})
+        uid, cookie = app.identity({})
+        headers = {'Cookie':cookie.split(';', 1)[0]}
+        p = profile(planningDeadline=(self.now+timedelta(days=60)).date().isoformat())
+        state = app.dispatch('PUT', '/api/profile', p, uid)
+        first = state['plans']['interest']['items'][0]
+        selected = app.dispatch('POST', '/api/selected-plan', {'mode':'interest'}, uid)
+        self.assertFalse(selected['selectedPlan']['needsConfirmation'])
+        bought = app.dispatch('POST', '/api/purchase', {'sessionId':first['id'], 'actualPrice':first['price']+100}, uid)
+        self.assertEqual(bought['remainingBalance'], 3200-first['price']-100)
+        # A restart with existing catalogue/user data must not need the bundled seed.
+        with patch('pushka.server.DEFAULT_SNAPSHOT', Path(self.tmp.name)/'removed-snapshot.sqlite3'), block_network():
             restarted = App(self.target)
-            self.assertEqual(restarted.identity(headers), (uid, None))
-            state = restarted.dispatch('GET', '/api/state', None, uid)
-            self.assertEqual(state['purchased'], bought['purchased'])
-            self.assertEqual(state['profile'], bought['profile'])
-            self.assertEqual(state['selectedPlan'], bought['selectedPlan'])
-            self.assertEqual(state['remainingBalance'], bought['remainingBalance'])
-            for mode in state['plans'].values():
-                self.assertTrue(any(i['id']==first['id'] and i['purchased'] for i in mode['items']))
+        self.assertEqual(restarted.identity(headers), (uid, None))
+        state = restarted.dispatch('GET', '/api/state', None, uid)
+        self.assertEqual(state['purchased'], bought['purchased'])
+        self.assertEqual(state['profile'], bought['profile'])
+        self.assertEqual(state['selectedPlan'], bought['selectedPlan'])
+        self.assertEqual(state['remainingBalance'], bought['remainingBalance'])
+        for mode in state['plans'].values():
+            self.assertTrue(any(i['id']==first['id'] and i['purchased'] for i in mode['items']))
 
-    def test_bad_snapshot_fails_explicitly_instead_of_substituting_demo(self):
+    def test_bad_snapshot_fails_explicitly_without_resetting_user_data(self):
         self.snapshot.write_bytes(b'not sqlite')
         store = Store(self.target)
         store.update_user('existing-user', draft='keep me')
-        with self.assertRaisesRegex(ValueError, 'CATALOG_SNAPSHOT_PATH'):
+        with self.assertRaisesRegex(ValueError, 'snapshot'):
             load_catalog_snapshot(store, self.snapshot)
         self.assertEqual(store.meta(), {})
         self.assertEqual(store.catalog(), [])
@@ -107,7 +129,7 @@ class SnapshotTests(unittest.TestCase):
 
     def test_missing_snapshot_on_new_database_has_actionable_error(self):
         store = Store(self.target)
-        with self.assertRaisesRegex(ValueError, 'CATALOG_SNAPSHOT_PATH'):
+        with self.assertRaisesRegex(ValueError, 'snapshot'):
             load_catalog_snapshot(store, Path(self.tmp.name)/'missing.sqlite3')
         self.assertEqual(store.catalog(), [])
         self.assertEqual(store.meta(), {})
@@ -119,15 +141,13 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(load_catalog_snapshot(store, Path(self.tmp.name)/'missing.sqlite3'), 0)
         self.assertEqual(store.catalog(), before)
 
-    def test_demo_is_explicit_future_dated_and_not_real_source(self):
-        with patch.dict(os.environ, {**self.env, 'CULTURE_SOURCE_MODE':'demo'}):
-            app = App(self.target)
-            state = app.state_for_app('judge')
-            self.assertTrue(state['demo'])
-            rows = app.store.catalog()
-            self.assertEqual(len(rows), 10)
-            self.assertTrue(all(datetime.fromisoformat(r['startsAt'])>self.now for r in rows))
-            self.assertTrue(all(r['source']=='fixture' and r['saleLink'] is None for r in rows))
+    def test_simulated_catalogue_snapshot_is_rejected_as_runtime_data(self):
+        simulated = Path(self.tmp.name) / 'simulated.sqlite3'
+        Store(simulated).replace_catalog(demo_rows(self.now), {
+            'kind':'simulated', 'label':'Только тестовые вымышленные события',
+            'fetchedAt':self.now.isoformat()})
+        with self.assertRaisesRegex(ValueError, 'Unsupported catalogue snapshot source'):
+            read_snapshot(simulated)
 
     def test_shipped_snapshot_is_only_public_catalogue_and_has_expected_provenance(self):
         rows, source = read_snapshot(DEFAULT_SNAPSHOT)

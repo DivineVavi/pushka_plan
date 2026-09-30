@@ -1,4 +1,4 @@
-"""HTTP entry point: local demo or authenticated MAX webhook + mini-app."""
+"""Snapshot-only HTTP entry point: browser sandbox or authenticated MAX mini-app."""
 import hmac
 import json
 import logging
@@ -13,8 +13,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 from .bot import Bot, MaxClient, send_due_reminders
-from .catalog import demo_rows, ensure_catalog
-from .culture_public import sync as sync_culture
 from .planner import public_event_page
 from .service import Invalid, Service, validate_max_init
 from .store import Store
@@ -52,29 +50,12 @@ class App:
         self.client = MaxClient(token) if token else None
         self.bot = Bot(self.store, self.client) if token else None
         self.cookie_key = (os.getenv('DEMO_COOKIE_KEY') or self.store.demo_cookie_key()).encode()
-        self.source_mode = os.getenv('CULTURE_SOURCE_MODE') or 'snapshot'
-        if self.source_mode not in ('snapshot', 'demo', 'culture-public', 'pro-culture'):
-            raise ValueError('CULTURE_SOURCE_MODE must be snapshot, demo, culture-public or pro-culture')
-        self.culture_mode = self.source_mode == 'culture-public'
-        if self.source_mode == 'snapshot':
-            load_catalog_snapshot(self.store, os.getenv('CATALOG_SNAPSHOT_PATH') or DEFAULT_SNAPSHOT)
-        elif self.source_mode == 'demo':
-            if not self.store.meta():
-                now = datetime.now(timezone.utc)
-                self.store.replace_catalog(demo_rows(now), {'kind': 'simulated',
-                    'label': 'Учебный набор demo-v1: вымышленные события, не для покупки',
-                    'fetchedAt': now.isoformat(), 'sourceUrl': None, 'lastError': None})
-        elif self.culture_mode:
-            if self.store.meta().get('kind') != 'culture-public':
-                # Switching sources must never label the old simulated or PRO
-                # rows as real Moscow listings. Profiles/purchases survive.
-                self.store.replace_catalog([], {'kind':'unavailable', 'label':'Культура.РФ · сбор Москвы ещё не завершён',
-                    'fetchedAt':None, 'sourceUrl':'https://www.culture.ru/afisha/moskva/pushkinskaya-karta',
-                    'lastError':'Ожидается первый полный снимок Культура.РФ'})
-        else:
-            if not (os.getenv('PRO_API_KEY') or os.getenv('PRO_SNAPSHOT_PATH')):
-                raise ValueError('pro-culture mode requires PRO_API_KEY or PRO_SNAPSHOT_PATH')
-            ensure_catalog(self.store, os.getenv('PRO_API_KEY', ''))
+        # Runtime catalogue ingestion is deliberately offline: initialize only
+        # an empty catalogue from the bundled, prepared SQLite snapshot.
+        load_catalog_snapshot(self.store, os.getenv('CATALOG_SNAPSHOT_PATH') or DEFAULT_SNAPSHOT)
+        kind = self.store.meta().get('kind')
+        if kind not in ('culture-public', 'culture-public-prepared'):
+            raise ValueError('Runtime catalogue must be a culture-public SQLite snapshot')
 
     def identity(self, headers):
         if self.token:
@@ -135,22 +116,10 @@ class App:
         while True:
             time.sleep(60)
             try:
-                if self.culture_mode:
-                    meta = self.store.meta()
-                    now = datetime.now(timezone.utc)
-                    stamp, attempt = meta.get('fetchedAt'), meta.get('lastAttempt')
-                    if (not stamp or (now-datetime.fromisoformat(stamp)).total_seconds() >= 12*3600) and (
-                            not attempt or (now-datetime.fromisoformat(attempt)).total_seconds() >= 3600):
-                        try:
-                            sync_culture(self.store)
-                        except Exception:
-                            log.warning('Moscow public-source sync failed; previous snapshot retained')
-                elif self.source_mode == 'pro-culture' and os.getenv('PRO_API_KEY'):
-                    ensure_catalog(self.store, os.environ['PRO_API_KEY'])
                 if self.token:
                     send_due_reminders(self.store, self.service, self.client)
             except Exception:
-                log.exception('Background synchronization/reminders failed')
+                log.exception('Background reminder delivery failed')
 
 
 def handler(app):
@@ -218,7 +187,7 @@ def handler(app):
                                        'pricedSessions':sum(r['minPrice'] is not None for r in rows),
                                        'linkedSessions':sum(bool(r['saleLink']) for r in rows),
                                        'sourcePageSessions':sum(public_event_page(r.get('sourceUrl')) for r in rows if r.get('source') == 'culture-public'),
-                                       'sync':app.store.latest_culture_sync(), **app.store.stats()})
+                                       **app.store.stats()})
             if path.startswith('/api/'):
                 if method not in ('GET','PUT','POST'):
                     return self.send(405, {'error':'Method not allowed'})
