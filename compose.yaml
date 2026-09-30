@@ -4,19 +4,11 @@ services:
     restart: unless-stopped
     environment:
       PUSHKA_DB: /var/lib/pushka/pushka.sqlite3
+      CATALOG_SNAPSHOT_PATH: ${CATALOG_SNAPSHOT_PATH:-/app/data/catalog-snapshot.sqlite3}
       MAX_BOT_TOKEN: ${MAX_BOT_TOKEN:-}
       MAX_WEBHOOK_SECRET: ${MAX_WEBHOOK_SECRET:-}
-      MAX_WEB_APP_ID: ${MAX_WEB_APP_ID:-}
+      MAX_WEB_APP_ID: ${MAX_WEB_APP_ID:-t99_hakaton_max_bot}
       PUBLIC_URL: ${PUBLIC_URL:-}
-      PRO_API_KEY: ${PRO_API_KEY:-}
-      PRO_SNAPSHOT_PATH: ${PRO_SNAPSHOT_PATH:-}
-      PRO_LOCALE_IDS: ${PRO_LOCALE_IDS:-}
-      CULTURE_SOURCE_MODE: ${CULTURE_SOURCE_MODE:-snapshot}
-      CATALOG_SNAPSHOT_PATH: ${CATALOG_SNAPSHOT_PATH:-/app/data/catalog-snapshot.sqlite3}
-      CULTURE_PROXY_HOST: ${CULTURE_PROXY_HOST:-pool.proxy.market}
-      CULTURE_PROXY_PORT: ${CULTURE_PROXY_PORT:-10000}
-      CULTURE_PROXY_USER: ${CULTURE_PROXY_USER:-}
-      CULTURE_PROXY_PASSWORD: ${CULTURE_PROXY_PASSWORD:-}
       ADMIN_TOKEN: ${ADMIN_TOKEN:-}
       DEMO_COOKIE_KEY: ${DEMO_COOKIE_KEY:-}
     ports:

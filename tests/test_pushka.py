@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
-from pushka.catalog import API, demo_rows, normalize_official, sync_official, load_prepared_snapshot
+from catalog_fixture import demo_rows
 from pushka.planner import plan, conflict, public_event_page
 from pushka.service import Invalid, Service, validate_max_init, validate_profile
 from pushka.store import Store
@@ -33,6 +33,23 @@ def profile(**changes):
          'excludedCategories': [], 'age':18, 'maxEvents':4, 'travelBufferMinutes':30}
     p.update(changes)
     return p
+
+
+def prepared_public_rows(now):
+    fetched_at = (now - timedelta(minutes=5)).isoformat()
+    return [{**row, 'source': 'culture-public',
+             'sourceUrl': 'https://www.culture.ru/events/7219156/koncert-da-zdravstvuet-meksika',
+             'exactPriceKnown': False, 'fetchedAt': fetched_at}
+            for row in demo_rows(now)]
+
+
+def replace_with_public_test_catalog(store, now):
+    rows = prepared_public_rows(now)
+    store.replace_catalog(rows, {'kind': 'culture-public-prepared',
+        'label': 'Подготовленный тестовый снимок Культура.РФ',
+        'sourceUrl': 'https://www.culture.ru/afisha/moskva/pushkinskaya-karta',
+        'fetchedAt': rows[0]['fetchedAt']})
+    return rows
 
 
 class PlannerTests(unittest.TestCase):
@@ -314,50 +331,6 @@ class ServiceTests(unittest.TestCase):
         with self.assertRaises(Invalid):
             self.service.purchase('user1','arbitrary-id',-1)
 
-    def test_atomic_sync_keeps_previous_catalog(self):
-        initial = self.store.catalog()
-        def failed(url):
-            raise OSError('offline')
-        with self.assertRaises(OSError):
-            sync_official(self.store,'secret',now=self.today,fetch=failed)
-        self.assertEqual(initial,self.store.catalog())
-
-    def test_official_sync_paginates_and_preserves_source(self):
-        calls = []
-        def fetch(url):
-            from urllib.parse import parse_qs, urlsplit
-            params = parse_qs(urlsplit(url).query)
-            calls.append(int(params['offset'][0]))
-            sample = {'id':1,'name':'Концерт','category':{'name':'Концерты'},'ageRestriction':12,'statusPushka':True,'isPublished':True,'inAccepted':True,
-                'price':500,'maxPrice':1000,'places':[{'id':3,'name':'Зал','locale':{'id':77},'saleLink':'https://tickets.example/1',
-                'seances':[{'start':int((self.today+timedelta(days=2)).timestamp()*1000),'end':int((self.today+timedelta(days=2,hours=2)).timestamp()*1000)}]}]}
-            return {'events':[sample]}
-        self.assertEqual(sync_official(self.store,'secret',now=self.today,fetch=fetch),1)
-        self.assertEqual(calls,[0])
-        self.assertEqual(self.store.catalog()[0]['raw']['name'],'Концерт')
-        self.assertEqual(self.store.meta()['kind'],'pro-culture')
-
-    def test_prepared_snapshot_is_not_labeled_live(self):
-        path = Path(self.tmp.name)/'prepared.json'
-        sample = {'id':10,'name':'Событие','category':{'name':'Концерты'},'ageRestriction':12,'statusPushka':True,'isPublished':True,'inAccepted':True,
-                  'price':500,'maxPrice':500,'places':[{'id':9,'name':'Зал','locale':{'id':77},'saleLink':'https://tickets.example/10',
-                  'seances':[{'start':int((self.today+timedelta(days=2)).timestamp()*1000),'end':int((self.today+timedelta(days=2,hours=2)).timestamp()*1000)}]}]}
-        path.write_text(json.dumps({'sourceUrl':API,'fetchedAt':self.today.isoformat(),'events':[sample]}))
-        self.assertEqual(load_prepared_snapshot(self.store, path),1)
-        self.assertEqual(self.store.meta()['kind'],'pro-culture-prepared')
-        self.assertEqual(self.store.catalog()[0]['saleLink'],'https://tickets.example/10')
-
-    def test_official_adapter_fails_closed(self):
-        event = {'id':1,'name':'Тест','category':{'name':'Концерты'},'ageRestriction':12,'statusPushka':True,'isPublished':True,'inAccepted':True,
-                 'price':500,'maxPrice':1000,'places':[{'id':3,'name':'Театр','locale':{'id':77,'timezone':'Europe/Moscow'},'saleLink':'https://tickets.example/1',
-                 'seances':[{'start':int((self.today+timedelta(days=2)).timestamp()*1000),'end':int((self.today+timedelta(days=2,hours=2)).timestamp()*1000)}]}]}
-        row = normalize_official(event,self.today.isoformat())[0]
-        self.assertFalse(row['exactPriceKnown'])
-        self.assertEqual(row['minPrice'],500)
-        self.assertEqual(row['localeId'],'77')
-        self.assertEqual(normalize_official({**event,'isPublished':False}, self.today.isoformat()),[])
-
-
 class AuthAndBotTests(unittest.TestCase):
     def test_max_client_targets_bot_started_chat_id(self):
         client = MaxClient('token')
@@ -461,8 +434,8 @@ class ProductionAuthTests(unittest.TestCase):
     def test_http_max_signature_and_webhook_secret(self):
         with tempfile.TemporaryDirectory() as path:
             # Authentication does not depend on the bundled snapshot's calendar dates.
-            with patch.dict(os.environ, {'CULTURE_SOURCE_MODE':'demo'}):
-                app = App(Path(path)/'prod.db','max-token','secret-webhook')
+            app = App(Path(path)/'prod.db','max-token','secret-webhook')
+            replace_with_public_test_catalog(app.store, datetime.now(timezone.utc))
             received = []
             app.bot.handle = received.append
             server = ThreadingHTTPServer(('127.0.0.1',0), handler(app))
@@ -530,8 +503,8 @@ class SetupMaxTests(unittest.TestCase):
 class HTTPTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        with patch.dict(os.environ, {'CULTURE_SOURCE_MODE':'demo'}):
-            self.app = App(Path(self.tmp.name)/'http.db')
+        self.app = App(Path(self.tmp.name)/'http.db')
+        replace_with_public_test_catalog(self.app.store, datetime.now(timezone.utc))
         self.server = ThreadingHTTPServer(('127.0.0.1',0), handler(self.app))
         self.thread = threading.Thread(target=self.server.serve_forever,daemon=True)
         self.thread.start()
@@ -580,7 +553,7 @@ class HTTPTests(unittest.TestCase):
                     self.client.open(self.base + path)
                 self.assertEqual(error.exception.code, 404)
 
-    def test_demo_cookie_isolation_and_csrf(self):
+    def test_cookie_isolation_and_csrf(self):
         def send(client, path, data=None, method=None, origin=None):
             headers = {'Content-Type':'application/json'} if data is not None else {}
             if origin: headers['Origin'] = origin

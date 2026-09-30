@@ -12,7 +12,7 @@ WORKDIR /app
 COPY pushka/ /app/pushka/
 COPY certs/ /app/certs/
 COPY --from=ui-build /app/static/ /app/static/
-COPY data/demo-v1.json data/catalog-snapshot.sqlite3 /app/data/
+COPY data/catalog-snapshot.sqlite3 /app/data/catalog-snapshot.sqlite3
 COPY requirements.txt /app/requirements.txt
 COPY tests/ /app/tests/
 # Build contexts unpacked with umask 077 must still be readable by the runtime user.

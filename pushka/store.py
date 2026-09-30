@@ -2,8 +2,6 @@
 import json
 import sqlite3
 import secrets
-import uuid
-from datetime import datetime, timedelta, timezone
 from statistics import median
 from contextlib import contextmanager
 from pathlib import Path
@@ -44,26 +42,6 @@ class Store:
                 CREATE INDEX IF NOT EXISTS idx_sessions_start ON sessions(json_extract(payload, '$.startsAt'));
                 CREATE INDEX IF NOT EXISTS idx_venues_locale ON venues(json_extract(payload, '$.localeId'));
                 CREATE INDEX IF NOT EXISTS idx_sessions_event ON sessions(event_id);
-                CREATE TABLE IF NOT EXISTS culture_sync_runs (
-                    run_id TEXT PRIMARY KEY, listing_hash TEXT NOT NULL, status TEXT NOT NULL,
-                    started_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-                    expected_event_pages INTEGER NOT NULL, listing_items INTEGER NOT NULL,
-                    completed_event_pages INTEGER NOT NULL DEFAULT 0,
-                    source_payload TEXT, error TEXT
-                );
-                CREATE INDEX IF NOT EXISTS idx_culture_sync_status ON culture_sync_runs(status, updated_at);
-                CREATE TABLE IF NOT EXISTS culture_sync_pages (
-                    run_id TEXT NOT NULL, url TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
-                    PRIMARY KEY (run_id, url)
-                );
-                CREATE TABLE IF NOT EXISTS culture_sync_queue (
-                    run_id TEXT NOT NULL, url TEXT NOT NULL, payload TEXT NOT NULL,
-                    queued_at TEXT NOT NULL, PRIMARY KEY (run_id, url)
-                );
-                CREATE TABLE IF NOT EXISTS culture_staged_rows (
-                    run_id TEXT NOT NULL, id TEXT NOT NULL, payload TEXT NOT NULL,
-                    PRIMARY KEY (run_id, id)
-                );
             ''')
             if 'selected_plan' not in {r['name'] for r in db.execute('PRAGMA table_info(users)')}:
                 db.execute('ALTER TABLE users ADD COLUMN selected_plan TEXT')
@@ -114,109 +92,6 @@ class Store:
             db.executemany('INSERT INTO sessions VALUES (?,?,?,?)', ((r['id'],r['eventId'],r['venueId'],json.dumps({k:r[k] for k in session_fields if k in r},ensure_ascii=False)) for r in rows))
             for k, v in source.items():
                 db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)', (k, json.dumps(v, ensure_ascii=False)))
-
-    def begin_culture_sync(self, listing_hash, urls, listing_items, fetched_at):
-        now = datetime.now(timezone.utc)
-        started_after = (now - timedelta(hours=12)).isoformat()
-        with self.db() as db:
-            previous = db.execute('''SELECT run_id, started_at FROM culture_sync_runs
-                WHERE listing_hash=? AND status IN ('collecting','failed','ready') AND started_at>=?
-                ORDER BY started_at DESC LIMIT 1''', (listing_hash, started_after)).fetchone()
-            if previous:
-                run_id, started_at = previous['run_id'], previous['started_at']
-                db.execute('''UPDATE culture_sync_runs SET status='collecting', updated_at=?,
-                    expected_event_pages=?, listing_items=?, error=NULL WHERE run_id=?''',
-                    (now.isoformat(), len(urls), listing_items, run_id))
-            else:
-                run_id, started_at = uuid.uuid4().hex, fetched_at
-                db.execute('''INSERT INTO culture_sync_runs
-                    (run_id,listing_hash,status,started_at,updated_at,expected_event_pages,listing_items)
-                    VALUES (?,?, 'collecting', ?,?,?,?)''',
-                    (run_id, listing_hash, started_at, now.isoformat(), len(urls), listing_items))
-            db.executemany('INSERT OR IGNORE INTO culture_sync_pages(run_id,url) VALUES (?,?)',
-                           ((run_id, url) for url in urls))
-            completed = {r[0] for r in db.execute(
-                "SELECT url FROM culture_sync_pages WHERE run_id=? AND status='done'", (run_id,))}
-            queued = db.execute('SELECT url,payload FROM culture_sync_queue WHERE run_id=?', (run_id,)).fetchall()
-            queued_urls = {r['url'] for r in queued}
-            staged_count = db.execute('SELECT COUNT(*) FROM culture_staged_rows WHERE run_id=?', (run_id,)).fetchone()[0]
-            queued_count = sum(len(json.loads(r['payload'])) for r in queued)
-            return run_id, completed | queued_urls, staged_count + queued_count, started_at
-
-    def queue_culture_page(self, run_id, url, rows):
-        with self.db() as db:
-            db.execute('''INSERT OR IGNORE INTO culture_sync_queue(run_id,url,payload,queued_at)
-                VALUES (?,?,?,?)''',
-                (run_id, url, json.dumps(rows, ensure_ascii=False), datetime.now(timezone.utc).isoformat()))
-
-    def mark_culture_sync_ready(self, run_id, source):
-        with self.db() as db:
-            db.execute('''UPDATE culture_sync_runs SET status='ready',source_payload=?,updated_at=?
-                WHERE run_id=? AND status='collecting' ''',
-                (json.dumps(source, ensure_ascii=False), datetime.now(timezone.utc).isoformat(), run_id))
-
-    def fail_culture_sync(self, run_id, reason):
-        with self.db() as db:
-            db.execute('''UPDATE culture_sync_runs SET status='failed',error=?,updated_at=?
-                WHERE run_id=? AND status!='completed' ''',
-                (reason, datetime.now(timezone.utc).isoformat(), run_id))
-
-    def write_culture_queue_batch(self, run_id, limit=100):
-        with self.db() as db:
-            db.execute('BEGIN IMMEDIATE')
-            queued = db.execute('''SELECT url,payload FROM culture_sync_queue
-                WHERE run_id=? ORDER BY queued_at LIMIT ?''', (run_id, limit)).fetchall()
-            for item in queued:
-                rows = json.loads(item['payload'])
-                db.executemany('''INSERT OR REPLACE INTO culture_staged_rows(run_id,id,payload)
-                    VALUES (?,?,?)''', ((run_id, row['id'], json.dumps(row, ensure_ascii=False)) for row in rows))
-                db.execute('UPDATE culture_sync_pages SET status=\'done\' WHERE run_id=? AND url=?',
-                           (run_id, item['url']))
-                db.execute('DELETE FROM culture_sync_queue WHERE run_id=? AND url=?', (run_id, item['url']))
-            if queued:
-                db.execute('UPDATE culture_sync_runs SET updated_at=? WHERE run_id=?',
-                           (datetime.now(timezone.utc).isoformat(), run_id))
-            return len(queued)
-
-    def culture_sync_run(self, run_id):
-        with self.db() as db:
-            run = db.execute('SELECT * FROM culture_sync_runs WHERE run_id=?', (run_id,)).fetchone()
-            if not run:
-                return None
-            result = dict(run)
-            result['completed_event_pages'] = db.execute(
-                "SELECT COUNT(*) FROM culture_sync_pages WHERE run_id=? AND status='done'", (run_id,)).fetchone()[0]
-            result['queued_event_pages'] = db.execute(
-                'SELECT COUNT(*) FROM culture_sync_queue WHERE run_id=?', (run_id,)).fetchone()[0]
-            result['staged_sessions'] = db.execute(
-                'SELECT COUNT(*) FROM culture_staged_rows WHERE run_id=?', (run_id,)).fetchone()[0]
-            result['pending_event_pages'] = result['expected_event_pages'] - result['completed_event_pages'] - result['queued_event_pages']
-            return result
-
-    def culture_staged_rows(self, run_id):
-        with self.db() as db:
-            return [json.loads(r[0]) for r in db.execute(
-                'SELECT payload FROM culture_staged_rows WHERE run_id=? ORDER BY id', (run_id,))]
-
-    def complete_culture_sync(self, run_id):
-        with self.db() as db:
-            db.execute('''UPDATE culture_sync_runs SET status='completed',updated_at=?,error=NULL
-                WHERE run_id=?''', (datetime.now(timezone.utc).isoformat(), run_id))
-
-    def latest_culture_sync(self):
-        with self.db() as db:
-            row = db.execute('SELECT run_id FROM culture_sync_runs ORDER BY started_at DESC LIMIT 1').fetchone()
-        run = self.culture_sync_run(row[0]) if row else None
-        if not run:
-            return None
-        return {key:run[key] for key in ('run_id','status','started_at','updated_at',
-            'expected_event_pages','completed_event_pages','queued_event_pages',
-            'pending_event_pages','staged_sessions','error')}
-
-    def source_error(self, message):
-        with self.db() as db:
-            for key, value in (('lastError', message), ('lastAttempt', datetime.now(timezone.utc).isoformat())):
-                db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)', (key, json.dumps(value, ensure_ascii=False)))
 
     def catalog(self, locale=None, after=None, before=None):
         where, params = [], []
